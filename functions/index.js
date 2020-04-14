@@ -10,6 +10,8 @@ admin.initializeApp({
 
 
 var Xray = require('x-ray')
+var fetch = require("node-fetch");
+
 
 const salud_web_site_url = "http://www.salud.gov.pr/Pages/coronavirus.aspx"
 const NUMBERS = "0123456789"
@@ -199,6 +201,26 @@ exports.addTodaysDataToHistoryScheduled = functions.pubsub.schedule('10 9 * * *'
 
 
   return null;
+});
+
+
+exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
+  const month = 4
+  const day = 11
+  const year = 2020
+  const url = `https://raw.githubusercontent.com/Code4PuertoRico/covid19-pr-api/master/data/PuertoRicoTaskForce/${month}-${day}-${year}/CSV/municipios.csv`
+  console.log(`GET ${url}`)
+  return fetch(url,{method:'GET'})
+  .then(data=>{
+    return data.buffer()
+  })
+  .then(processed=>{
+    return response.send(processed)
+  })
+  .catch(error=>{
+    return response.send(error)
+  })
+
 });
 
 
