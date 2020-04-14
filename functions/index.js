@@ -51,19 +51,24 @@ getTimeStamp = ()=>{
   return {month:month,day:day,year:year,hour:hour,minutes:minutes}
 }
 
-exports.scrapeTodaysDataScheduled = functions.pubsub.schedule('5 9 * * *')
+exports.scrapeTodaysDataScheduled = functions.pubsub.schedule('0 8 * * *')
   .timeZone('America/New_York') // Users can choose timezone - default is America/Los_Angeles
   .onRun((context) => {
-  console.log("Scraping Today's Data:This will be run every day at 9:05 AM Eastern!");
+  console.log("Scraping Today's Data:This will be run every day at 8:00 AM Eastern!");
   var x = Xray()
 
   x(salud_web_site_url, '.ms-rteElement-H3B')((err, item) =>{
     let ref = admin.firestore().doc("data/todaysData")
+    console.log(`New saludTimeSignature is ${item}`)
     ref.update({saludTimeSignature:item})
-    .then(console.log("completed updating salud time signature"))
+    .then(data=>{
+      console.log("completed updating salud time signature")
+      return null
+    })
     .catch(error=>{
       const errorMessage = "Error obtaining salud time signature\n"+error
       console.log(errorMessage,err)
+      return null
     })
   })
 
@@ -90,10 +95,14 @@ exports.scrapeTodaysDataScheduled = functions.pubsub.schedule('5 9 * * *')
 
     let ref = admin.firestore().doc("data/todaysData")
     ref.set(labeledData)
-    .then(console.log("Wrote new entry\n",labeledData))
+    .then(data=>{
+      console.log("Wrote new entry")
+      return null
+    })
     .catch(error=>{
       const errorMessage = "Error scraping/writing\n"+error
       console.log(errorMessage,err)
+      return null
     })
   })
 
@@ -166,10 +175,10 @@ exports.scrapeManually = functions.https.onRequest((request, response) => {
 });
 
 
-exports.addTodaysDataToHistoryScheduled = functions.pubsub.schedule('10 9 * * *')
+exports.addTodaysDataToHistoryScheduled = functions.pubsub.schedule('5 8 * * *')
   .timeZone('America/New_York') // Users can choose timezone - default is America/Los_Angeles
   .onRun((context) => {
-  console.log("Adding Today's Data to History This will be run every day at 9:10 AM Eastern!");
+  console.log("Adding Today's Data to History This will be run every day at 8:05 AM Eastern!");
 
   let ref = admin.firestore().doc("data/todaysData")
   ref.get()
@@ -188,12 +197,13 @@ exports.addTodaysDataToHistoryScheduled = functions.pubsub.schedule('10 9 * * *'
     )
   })
     .then(data => {
-      console.log("Updated data succesfully")
-      return true
+      console.log("Add today's data succesfully")
+      return null
     })
     .catch(error=>{
       const errorMessage = "Error updating historical data\n"+error
       console.log(errorMessage)
+      return null
   })
 
 
@@ -203,6 +213,35 @@ exports.addTodaysDataToHistoryScheduled = functions.pubsub.schedule('10 9 * * *'
   return null;
 });
 
+
+processCSVText = (text) =>{
+  rows = text.split("\n")
+  for (var i = 0; i < rows.length; i++) {
+    rows[i] = rows[i].split(",")
+  }
+  var municipiosData = {}
+  for (var j = 0; j < rows.length; j++) {
+    const row = rows[j]
+    const MUNICIPIO_NAME_i = 0
+    const CONFIRMED_CASES_i = 1
+    const muncipioName = row[MUNICIPIO_NAME_i]
+    const confirmedCases = row[CONFIRMED_CASES_i]
+    municipiosData.muncipioName = {confirmedCases:confirmedCases}
+  }
+
+  return municipiosData
+
+}
+
+cleanTrailingWhitespace = (text) =>{
+  var lastTextIndex = 0
+  for (var i = 0; i < text.length; i++) {
+    if (text[i] !==" "){
+      lastTextIndex = i
+    }
+  }
+  return text.substring(0,lastTextIndex+1)
+}
 
 exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
   const month = 4
@@ -214,9 +253,40 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
   .then(data=>{
     return data.buffer()
   })
-  .then(processed=>{
-    return response.send(processed)
+  .then(buffer=>{
+    var text = buffer.toString()
+    // clean out quote chars
+    text = text.replace(/"/g, '')
+
+    var rows = text.split("\n")
+
+
+    console.log("ROWS",rows)
+    for (var i = 0; i < rows.length; i++) {
+      rows[i] = rows[i].split(",")
+    }
+    var municipiosData = {}
+    for (var j = 2; j < rows.length; j++) {
+      const row = rows[j]
+      console.log(`Row is ${row}`)
+      const MUNICIPIO_NAME_i = 0
+      const CONFIRMED_CASES_i = 1
+
+      var muncipioName = row[MUNICIPIO_NAME_i].slice(0,-1)
+      const confirmedCases = parseInt(row[CONFIRMED_CASES_i])
+      if (muncipioName.length > 0){
+        municipiosData[muncipioName] = {confirmedCases:confirmedCases}
+      }
+    }
+    return municipiosData
   })
+  .then(municipiosData=>{
+
+    let ref = admin.firestore().doc("data/municipios")
+    return ref.set(municipiosData)
+
+  })
+  .then(data=>response.send(data))
   .catch(error=>{
     return response.send(error)
   })
