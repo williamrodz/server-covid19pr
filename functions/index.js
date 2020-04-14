@@ -30,6 +30,12 @@ cleanString = (text) =>{
   return output
 }
 
+exports.serverTimeCheck = functions.https.onRequest((request, response) => {
+ response.send(new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'}));
+});
+
+
+
 DATA_LABELS = ["conductedTests","confirmedCases","negativeCases","testsInProgress","deaths"]
 
 attachLabels = (data,labels) =>{
@@ -41,74 +47,8 @@ attachLabels = (data,labels) =>{
 }
 
 getTimeStamp = ()=>{
-  let today = new Date()
-  let month = today.getMonth() + 1
-  let day = today.getDate()
-  let year = today.getFullYear()
-  let hour = today.getHours()
-  let minutes = today.getMinutes()
-
-  return {month:month,day:day,year:year,hour:hour,minutes:minutes}
+  return new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'});
 }
-
-exports.scrapeTodaysDataScheduled = functions.pubsub.schedule('0 8 * * *')
-  .timeZone('America/New_York') // Users can choose timezone - default is America/Los_Angeles
-  .onRun((context) => {
-  console.log("Scraping Today's Data:This will be run every day at 8:00 AM Eastern!");
-  var x = Xray()
-
-  x(salud_web_site_url, '.ms-rteElement-H3B')((err, item) =>{
-    let ref = admin.firestore().doc("data/todaysData")
-    console.log(`New saludTimeSignature is ${item}`)
-    ref.update({saludTimeSignature:item})
-    .then(data=>{
-      console.log("completed updating salud time signature")
-      return null
-    })
-    .catch(error=>{
-      const errorMessage = "Error obtaining salud time signature\n"+error
-      console.log(errorMessage,err)
-      return null
-    })
-  })
-
-
-
-  x(salud_web_site_url, ['.ms-rteElement-H2B'])((err, items) =>{
-    integers = []
-    for (var i = 0; i < items.length; i++) {
-      string = items[i]
-      console.log(string)
-      if (string.indexOf("COVID") === -1){// if firstChar starts with a number
-        integers.push(parseInt(cleanString(string)))
-      }
-    }
-    labeledData = attachLabels(integers,DATA_LABELS)
-    timestamp = getTimeStamp()
-    // labeledData["saludTimestampSignature"] = saludTimestampSignature
-    const timeDimensions = Object.keys(timestamp)
-    for (var i2 = 0; i2 < timeDimensions.length; i2++) {
-      dimension = timeDimensions[i2]
-      labeledData[dimension] = timestamp[dimension]
-    }
-
-
-    let ref = admin.firestore().doc("data/todaysData")
-    ref.set(labeledData)
-    .then(data=>{
-      console.log("Wrote new entry")
-      return null
-    })
-    .catch(error=>{
-      const errorMessage = "Error scraping/writing\n"+error
-      console.log(errorMessage,err)
-      return null
-    })
-  })
-
-
-  return null;
-});
 
 exports.getTodaysData = functions.https.onRequest((request, response) => {
   let ref = admin.firestore().doc("data/todaysData")
@@ -156,12 +96,7 @@ exports.scrapeManually = functions.https.onRequest((request, response) => {
     labeledData = attachLabels(integers,DATA_LABELS)
     timestamp = getTimeStamp()
     // labeledData["saludTimestampSignature"] = saludTimestampSignature
-    const timeDimensions = Object.keys(timestamp)
-    for (var i2 = 0; i2 < timeDimensions.length; i2++) {
-      dimension = timeDimensions[i2]
-      labeledData[dimension] = timestamp[dimension]
-    }
-
+    labeledData["timestamp"] = timestamp
 
     let ref = admin.firestore().doc("data/todaysData")
     ref.set(labeledData)
@@ -173,45 +108,49 @@ exports.scrapeManually = functions.https.onRequest((request, response) => {
     })
   })
 });
+//
+// exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
+//   let documentRef = admin.firestore().doc('data/historicalData');
+//   documentRef.get()
+//   .then(snapshot=>{
+//     if (snapshot.exists){
+//       var data = snapshot.data() // list of data per day
+//       data = data.all
+//       var cleanData = []
+//       for (var i = 0; i < data.length; i++) {
+//         var dataObject = data[i]
+//         console.log(dataObject)
+//         const confirmedCases = dataObject.confirmedCases
+//         const timestamp = dataObject.timestamp
+//         var newDataObject = {confirmedCases:confirmedCases,timestamp:timestamp}
+//         if (day == 12){
+//           newDataObject.conductedTests = 7973
+//           newDataObject.testsInProgress = 1251
+//           newDataObject.negativeCases = 5819
+//           newDataObject.deaths = 44
+//           newDataObject.saludTimeSignature = "(Datos al 12 de abril de 2020, 7:00 am)"
+//         }
+//         else if (day == 13){
+//           newDataObject.conductedTests = 8157
+//           newDataObject.testsInProgress = 1288
+//           newDataObject.negativeCases = 5960
+//           newDataObject.deaths = 45
+//         }
+//         cleanData.push(newDataObject)
+//       }
+//     console.log("Clean data is\n",cleanData)
+//     return documentRef.set({all:cleanData})
+//     }
+//     else{
+//       return "Data not found"
+//     }
+//   })
+//   .then(result=>response.send(result))
+//   .catch(error=>response.send(error))
+//
+//
+// });
 
-
-exports.addTodaysDataToHistoryScheduled = functions.pubsub.schedule('5 8 * * *')
-  .timeZone('America/New_York') // Users can choose timezone - default is America/Los_Angeles
-  .onRun((context) => {
-  console.log("Adding Today's Data to History This will be run every day at 8:05 AM Eastern!");
-
-  let ref = admin.firestore().doc("data/todaysData")
-  ref.get()
-  .then(snapshot=>{
-    if (snapshot.exists){
-      let data = snapshot.data()
-      return data
-    } else{
-      return {noDataAvailable:true}
-    }
-  })
-  .then(newDataEntry=>{
-    let documentRef = admin.firestore().doc('data/historicalData');
-    return documentRef.update(
-      'last7Days', admin.firestore.FieldValue.arrayUnion(newDataEntry)
-    )
-  })
-    .then(data => {
-      console.log("Add today's data succesfully")
-      return null
-    })
-    .catch(error=>{
-      const errorMessage = "Error updating historical data\n"+error
-      console.log(errorMessage)
-      return null
-  })
-
-
-
-
-
-  return null;
-});
 
 
 processCSVText = (text) =>{
@@ -310,7 +249,7 @@ exports.addTodaysDataToHistoryManually = functions.https.onRequest((request, res
   .then(newDataEntry=>{
     let documentRef = admin.firestore().doc('data/historicalData');
     return documentRef.update(
-      'last7Days', admin.firestore.FieldValue.arrayUnion(newDataEntry)
+      'all', admin.firestore.FieldValue.arrayUnion(newDataEntry)
     )
   })
     .then(data => {
