@@ -105,6 +105,24 @@ exports.scrapeTodaysData = functions.https.onRequest((request, response) => {
   })
 });
 
+TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeTodaysData"
+PRODUCTION_URL = " https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeTodaysData"
+
+exports.scheduledScrapeTodaysData = functions.pubsub.schedule('0 8 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+  url = PRODUCTION_URL
+  fetch(url,{method:'GET'})
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+data)
+    return null
+  })
+  .catch(error=>{
+    console.log("Error scraping today's number: "+error)
+    return null
+  })
+
+});
 
 
 
@@ -183,6 +201,26 @@ exports.logTodaysDataToHistory = functions.https.onRequest((request, response) =
 
 });
 
+
+
+exports.scheduledHistoryAdd = functions.pubsub.schedule('5 8 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/logTodaysDataToHistory"
+    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/logTodaysDataToHistory"
+
+    url = PRODUCTION_URL
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success adding today's data to history: "+data)
+          return null
+        })
+      .catch(error=>{
+        console.log("Error adding today's data to history: "+error)
+        return null
+      })
+
+});
 
 // exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
 //   let documentRef = admin.firestore().doc('data/historicalData');
