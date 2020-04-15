@@ -125,14 +125,56 @@ exports.scheduledScrapeTodaysData = functions.pubsub.schedule('0 8 * * *')
 });
 
 
+exports.playground = functions.https.onRequest((request, response) => {
+  var x = Xray()
+  datesURL = "https://github.com/Code4PuertoRico/covid19-pr-api/tree/master/data"
+
+  gettingDates = new Promise((resolve,reject)=>{
+    x(datesURL, 'ol',['li'])((error,items)=>{
+      if (error){
+        reject(error)
+      } else{
+        resolve(items)
+      }
+    })
+  })
+
+  gettingDates.then(data=>response.send(data)).catch(error=>response.send(error))
+
+});
+
+
 
 exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
-  const month = 4
-  const day = 11
-  const year = 2020
-  const url = `https://raw.githubusercontent.com/Code4PuertoRico/covid19-pr-api/master/data/PuertoRicoTaskForce/${month}-${day}-${year}/CSV/municipios.csv`
-  console.log(`GET ${url}`)
-  return fetch(url,{method:'GET'})
+  console.log("Scraiping data for municipios")
+  var x = Xray()
+  datesURL = "https://github.com/Code4PuertoRico/covid19-pr-api/tree/master/data"
+
+  gettingDates = new Promise((resolve,reject)=>{
+    x(datesURL, 'ol',['li'])((error,items)=>{
+      if (error){
+        reject(error)
+      } else{
+        resolve(items)
+      }
+    })
+  })
+
+
+  gettingDates
+  .then(dates=>{
+    lastDate = dates[dates.length - 1]
+    console.log("Last date is "+lastDate)
+
+    splitUp = lastDate.split("-") // date is in form 04-11-2020
+    month = parseInt(splitUp[0]) // has to be in single digit form for URL, others don't
+    day = splitUp[1]
+    year = splitUp[2]
+
+    const url = `https://raw.githubusercontent.com/Code4PuertoRico/covid19-pr-api/master/data/PuertoRicoTaskForce/${month}-${day}-${year}/CSV/municipios.csv`
+    console.log(`GET ${url}`)
+    return fetch(url,{method:'GET'})
+  })
   .then(data=>{
     return data.buffer()
   })
@@ -153,6 +195,16 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
       const CONFIRMED_CASES_i = 1
 
       var muncipioName = row[MUNICIPIO_NAME_i].slice(0,-1)
+      // correct municipio names
+      nameCorrections = {"Afasco":"Añasco","Bayamon":"Bayamón","Catano":"Cataño",
+      "Guanica":"Guánica","Loiza":"Loíza","Manati":"Manatí","Mayaguez":"Mayagüez",
+      "Rincon":"Rincón","Sabana Grande":"Sábana Grande","San German":"San Germán",
+      "San Sebastian":"San Sebastián"}
+      if (muncipioName in nameCorrections){
+        muncipioName = nameCorrections[muncipioName]
+      }
+
+
       const confirmedCases = parseInt(row[CONFIRMED_CASES_i])
       if (muncipioName.length > 0){
         municipiosData[muncipioName] = {confirmedCases:confirmedCases}
@@ -163,7 +215,7 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
   .then(municipiosData=>{
 
     let ref = admin.firestore().doc("data/municipios")
-    return ref.set(municipiosData)
+    return ref.set({all:municipiosData})
 
   })
   .then(data=>response.send(data))
