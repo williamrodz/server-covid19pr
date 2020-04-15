@@ -1,7 +1,7 @@
 const functions = require('firebase-functions');
 var admin = require("firebase-admin");
-
 var serviceAccount = require("./privateKey.json")
+var bluepromise = require('bluebird');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -11,6 +11,7 @@ admin.initializeApp({
 
 var Xray = require('x-ray')
 var fetch = require("node-fetch");
+const util = require('util')
 
 
 const salud_web_site_url = "http://www.salud.gov.pr/Pages/coronavirus.aspx"
@@ -50,137 +51,62 @@ getTimeStamp = ()=>{
   return new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'});
 }
 
-exports.getTodaysData = functions.https.onRequest((request, response) => {
-  let ref = admin.firestore().doc("data/todaysData")
-  ref.get()
-  .then(snapshot=>{
-    if (snapshot.exists){
-      console.log("Retrieved today's data succesfully")
-      let data = snapshot.data()
-      return response.send(data)
-    } else{
-      return response.send("Today's data does not exist")
-    }
-  })
-  .catch(error=>{
-    const errorMessage = "Error retrieving today's data\n"+error
-    response.send(errorMessage)
-  })
-});
 
-exports.scrapeManually = functions.https.onRequest((request, response) => {
+exports.scrapeTodaysData = functions.https.onRequest((request, response) => {
   var x = Xray()
 
-  x(salud_web_site_url, '.ms-rteElement-H3B')((err, item) =>{
-    let ref = admin.firestore().doc("data/todaysData")
-    ref.update({saludTimeSignature:item})
-    .then(console.log("completed updating salud time signature"))
-    .catch(error=>{
-      const errorMessage = "Error obtaining salud time signature\n"+error
-      console.log(errorMessage,err)
-      response.send(errorMessage)
+  scrapingSaludTimeSignature = new Promise((resolve,reject)=>{
+    x(salud_web_site_url, '.ms-rteElement-H3B')((error,items)=>{
+      if (error){
+        reject(error)
+      } else{
+        resolve(items)
+      }
     })
   })
 
-
-
-  x(salud_web_site_url, ['.ms-rteElement-H2B'])((err, items)=> {
+  scrapingSaludTimeSignature
+  .then(saludTimeSignature=>{
+    scrapingData = new Promise((resolve,reject)=>{
+      x(salud_web_site_url, ['.ms-rteElement-H2B'])((error,items)=>{
+      if (error){
+        reject(error)
+      } else{
+        resolve({items:items,saludTimeSignature:saludTimeSignature})
+      }
+    })
+  })
+  return scrapingData
+})
+  .then(data=>{
+    items = data.items
+    saludTimeSignature = data.saludTimeSignature
     integers = []
     for (var i = 0; i < items.length; i++) {
       string = items[i]
-      console.log(string)
+      console.log(`Scraped item is ${string}`)
       if (string.indexOf("COVID") === -1){// if firstChar starts with a number
         integers.push(parseInt(cleanString(string)))
       }
     }
     labeledData = attachLabels(integers,DATA_LABELS)
     timestamp = getTimeStamp()
-    // labeledData["saludTimestampSignature"] = saludTimestampSignature
+    labeledData["saludTimeSignature"] = saludTimeSignature
     labeledData["timestamp"] = timestamp
 
     let ref = admin.firestore().doc("data/todaysData")
-    ref.set(labeledData)
-    .then(response.send(labeledData))
-    .catch(error=>{
-      const errorMessage = "Error scraping/writing\n"+error
-      console.log(errorMessage,err)
-      response.send(errorMessage)
-    })
+    return ref.set(labeledData)
+  })
+  .then(data=>response.send(data))
+  .catch(error=>{
+    const errorMessage = "Error scraping/writing\n"+error + "Finish error"
+    console.log(errorMessage)
+    return response.send(errorMessage)
   })
 });
-//
-// exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
-//   let documentRef = admin.firestore().doc('data/historicalData');
-//   documentRef.get()
-//   .then(snapshot=>{
-//     if (snapshot.exists){
-//       var data = snapshot.data() // list of data per day
-//       data = data.all
-//       var cleanData = []
-//       for (var i = 0; i < data.length; i++) {
-//         var dataObject = data[i]
-//         console.log(dataObject)
-//         const confirmedCases = dataObject.confirmedCases
-//         const timestamp = dataObject.timestamp
-//         var newDataObject = {confirmedCases:confirmedCases,timestamp:timestamp}
-//         if (day == 12){
-//           newDataObject.conductedTests = 7973
-//           newDataObject.testsInProgress = 1251
-//           newDataObject.negativeCases = 5819
-//           newDataObject.deaths = 44
-//           newDataObject.saludTimeSignature = "(Datos al 12 de abril de 2020, 7:00 am)"
-//         }
-//         else if (day == 13){
-//           newDataObject.conductedTests = 8157
-//           newDataObject.testsInProgress = 1288
-//           newDataObject.negativeCases = 5960
-//           newDataObject.deaths = 45
-//         }
-//         cleanData.push(newDataObject)
-//       }
-//     console.log("Clean data is\n",cleanData)
-//     return documentRef.set({all:cleanData})
-//     }
-//     else{
-//       return "Data not found"
-//     }
-//   })
-//   .then(result=>response.send(result))
-//   .catch(error=>response.send(error))
-//
-//
-// });
 
 
 
-processCSVText = (text) =>{
-  rows = text.split("\n")
-  for (var i = 0; i < rows.length; i++) {
-    rows[i] = rows[i].split(",")
-  }
-  var municipiosData = {}
-  for (var j = 0; j < rows.length; j++) {
-    const row = rows[j]
-    const MUNICIPIO_NAME_i = 0
-    const CONFIRMED_CASES_i = 1
-    const muncipioName = row[MUNICIPIO_NAME_i]
-    const confirmedCases = row[CONFIRMED_CASES_i]
-    municipiosData.muncipioName = {confirmedCases:confirmedCases}
-  }
-
-  return municipiosData
-
-}
-
-cleanTrailingWhitespace = (text) =>{
-  var lastTextIndex = 0
-  for (var i = 0; i < text.length; i++) {
-    if (text[i] !==" "){
-      lastTextIndex = i
-    }
-  }
-  return text.substring(0,lastTextIndex+1)
-}
 
 exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
   const month = 4
@@ -196,10 +122,7 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
     var text = buffer.toString()
     // clean out quote chars
     text = text.replace(/"/g, '')
-
     var rows = text.split("\n")
-
-
     console.log("ROWS",rows)
     for (var i = 0; i < rows.length; i++) {
       rows[i] = rows[i].split(",")
@@ -233,9 +156,7 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
 });
 
 
-
-
-exports.addTodaysDataToHistoryManually = functions.https.onRequest((request, response) => {
+exports.logTodaysDataToHistory = functions.https.onRequest((request, response) => {
   let ref = admin.firestore().doc("data/todaysData")
   ref.get()
   .then(snapshot=>{
@@ -261,6 +182,46 @@ exports.addTodaysDataToHistoryManually = functions.https.onRequest((request, res
   })
 
 });
+
+
+// exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
+//   let documentRef = admin.firestore().doc('data/historicalData');
+//   documentRef.get()
+//   .then(snapshot=>{
+//     if (snapshot.exists){
+//       var data = snapshot.data() // list of data per day
+//       data = data.all
+//       var cleanData = []
+//       for (var i = 0; i < data.length; i++) {
+//         var dataObject = data[i]
+//         console.log(dataObject)
+//         const confirmedCases = dataObject.confirmedCases
+//         const timestamp = dataObject.timestamp
+//         var newDataObject = {confirmedCases:confirmedCases,timestamp:timestamp}
+//         if (day == 12){
+//           newDataObject.conductedTests = 7973
+//           newDataObject.testsInProgress = 1251
+//           newDataObject.negativeCases = 5819
+//           newDataObject.deaths = 44
+//         }
+//         else if (day == 13){
+//           newDataObject.conductedTests = 8157
+//           newDataObject.testsInProgress = 1288
+//           newDataObject.negativeCases = 5960
+//           newDataObject.deaths = 45
+//         }
+//         cleanData.push(newDataObject)
+//       }
+//     console.log("Clean data is\n",cleanData)
+//     return documentRef.set({all:cleanData})
+//     }
+//     else{
+//       return "Data not found"
+//     }
+//   })
+//   .then(result=>response.send(result))
+//   .catch(error=>response.send(error))
+// });
 
 
 //

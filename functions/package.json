@@ -13,10 +13,12 @@
     "node": "8"
   },
   "dependencies": {
+    "bluebird": "^3.7.2",
     "firebase-admin": "^8.9.0",
     "firebase-functions": "^3.3.0",
     "jssoup": "0.0.11",
     "node-fetch": "^2.6.0",
+    "promisify": "0.0.3",
     "x-ray": "^2.3.4"
   },
   "devDependencies": {
