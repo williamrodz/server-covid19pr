@@ -125,23 +125,23 @@ exports.scheduledScrapeTodaysData = functions.pubsub.schedule('0 8 * * *')
 });
 
 
-exports.playground = functions.https.onRequest((request, response) => {
-  var x = Xray()
-  datesURL = "https://github.com/Code4PuertoRico/covid19-pr-api/tree/master/data"
-
-  gettingDates = new Promise((resolve,reject)=>{
-    x(datesURL, 'ol',['li'])((error,items)=>{
-      if (error){
-        reject(error)
-      } else{
-        resolve(items)
-      }
-    })
-  })
-
-  gettingDates.then(data=>response.send(data)).catch(error=>response.send(error))
-
-});
+// exports.playground = functions.https.onRequest((request, response) => {
+//   var x = Xray()
+//   datesURL = "https://github.com/Code4PuertoRico/covid19-pr-api/tree/master/data"
+//
+//   gettingDates = new Promise((resolve,reject)=>{
+//     x(datesURL, 'ol',['li'])((error,items)=>{
+//       if (error){
+//         reject(error)
+//       } else{
+//         resolve(items)
+//       }
+//     })
+//   })
+//
+//   gettingDates.then(data=>response.send(data)).catch(error=>response.send(error))
+//
+// });
 
 
 
@@ -222,6 +222,26 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
   .catch(error=>{
     return response.send(error)
   })
+
+});
+
+
+exports.scheduledMunicipioScrape = functions.pubsub.schedule('0 10 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeMunicipiosData"
+    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeMunicipiosData"
+
+    url = PRODUCTION_URL
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success adding today's data to history: "+data)
+          return null
+        })
+      .catch(error=>{
+        console.log("Error adding today's data to history: "+error)
+        return null
+      })
 
 });
 
