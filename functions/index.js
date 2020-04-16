@@ -108,7 +108,7 @@ exports.scrapeTodaysData = functions.https.onRequest((request, response) => {
 TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeTodaysData"
 PRODUCTION_URL = " https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeTodaysData"
 
-exports.scheduledScrapeTodaysData = functions.pubsub.schedule('0 8 * * *')
+exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
   url = PRODUCTION_URL
@@ -226,7 +226,7 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
 });
 
 
-exports.scheduledMunicipioScrape = functions.pubsub.schedule('0 10 * * *')
+exports.scheduledMunicipioScrape = functions.pubsub.schedule('35 9 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
     TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeMunicipiosData"
