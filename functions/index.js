@@ -213,6 +213,7 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
     return municipiosData
   })
   .then(municipiosData=>{
+    municipiosData["timestamp"] = getTimeStamp()
 
     let ref = admin.firestore().doc("data/municipios")
     return ref.set({all:municipiosData})
@@ -275,7 +276,7 @@ exports.logTodaysDataToHistory = functions.https.onRequest((request, response) =
 
 
 
-exports.scheduledHistoryAdd = functions.pubsub.schedule('5 8 * * *')
+exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
     TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/logTodaysDataToHistory"
