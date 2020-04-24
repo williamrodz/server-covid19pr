@@ -114,12 +114,12 @@ exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
   url = PRODUCTION_URL
   fetch(url,{method:'GET'})
   .then(data=>{
-    console.log("Success scraping today's numbers: "+data)
-    return null
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
   })
   .catch(error=>{
     console.log("Error scraping today's number: "+error)
-    return null
+    return error
   })
 
 });
@@ -236,12 +236,12 @@ exports.scheduledMunicipioScrape = functions.pubsub.schedule('35 9 * * *')
     url = PRODUCTION_URL
     fetch(url,{method:'GET'})
       .then(data=>{
-          console.log("Success adding today's data to history: "+data)
-          return null
+          console.log("Success adding today's data to history: "+Object.keys(data))
+          return data
         })
       .catch(error=>{
         console.log("Error adding today's data to history: "+error)
-        return null
+        return error
       })
 
 });
@@ -285,12 +285,12 @@ exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
     url = PRODUCTION_URL
     fetch(url,{method:'GET'})
       .then(data=>{
-          console.log("Success adding today's data to history: "+data)
-          return null
+          console.log("Success adding today's data to history: "+Object.keys(data))
+          return data
         })
       .catch(error=>{
         console.log("Error adding today's data to history: "+error)
-        return null
+        return error
       })
 
 });
