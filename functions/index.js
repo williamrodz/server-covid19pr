@@ -1,7 +1,12 @@
 const functions = require('firebase-functions');
 var admin = require("firebase-admin");
 var serviceAccount = require("./privateKey.json")
-var bluepromise = require('bluebird');
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+const https = require("https");
+const agent = new https.Agent({
+  rejectUnauthorized: false
+})
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -37,7 +42,7 @@ exports.serverTimeCheck = functions.https.onRequest((request, response) => {
 
 
 
-DATA_LABELS = ["conductedTests","confirmedCases","negativeCases","testsInProgress","deaths"]
+DATA_LABELS = ["confirmedCases","molecularTests","serologicalTests","deaths"]
 
 attachLabels = (data,labels) =>{
   output = {}
@@ -50,6 +55,26 @@ attachLabels = (data,labels) =>{
 getTimeStamp = ()=>{
   return new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'});
 }
+
+
+exports.newScrape = functions.https.onRequest((request, response) => {
+  var x = Xray()
+
+  scrapingSaludTimeSignature = new Promise((resolve,reject)=>{
+    x("https://www.covid19prdata.org/dashboard", ['h5'])((error,items)=>{
+      if (error){
+        reject(error)
+      } else{
+        resolve(items)
+      }
+    })
+  })
+
+  scrapingSaludTimeSignature.then(data=>response.send(data))
+  .catch(error=>response.send("ERROR:"+error))
+});
+
+
 
 
 exports.scrapeTodaysData = functions.https.onRequest((request, response) => {
@@ -80,6 +105,7 @@ exports.scrapeTodaysData = functions.https.onRequest((request, response) => {
 })
   .then(data=>{
     items = data.items
+    console.log("items are",items)
     saludTimeSignature = data.saludTimeSignature
     integers = []
     for (var i = 0; i < items.length; i++) {
