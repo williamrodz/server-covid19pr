@@ -1,6 +1,6 @@
 const functions = require('firebase-functions');
 var admin = require("firebase-admin");
-var serviceAccount = require("./privateKey.json")
+var keys = require("./privateKey.json")
 // process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 const https = require("https");
@@ -9,7 +9,7 @@ const agent = new https.Agent({
 })
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert(keys.firebase),
   databaseURL: "https://covid19puertorico-1a743.firebaseio.com"
 });
 
@@ -34,6 +34,10 @@ cleanString = (text) =>{
     }
   }
   return output
+}
+
+const formatInteger = (number)=>{
+  return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 exports.serverTimeCheck = functions.https.onRequest((request, response) => {
@@ -252,25 +256,25 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
 
 });
 
-
-exports.scheduledMunicipioScrape = functions.pubsub.schedule('35 9 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-    TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeMunicipiosData"
-    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeMunicipiosData"
-
-    url = PRODUCTION_URL
-    fetch(url,{method:'GET'})
-      .then(data=>{
-          console.log("Success adding today's data to history: "+Object.keys(data))
-          return data
-        })
-      .catch(error=>{
-        console.log("Error adding today's data to history: "+error)
-        return error
-      })
-
-});
+//
+// exports.scheduledMunicipioScrape = functions.pubsub.schedule('35 9 * * *')
+//   .timeZone('America/La_Paz')
+//   .onRun((context)=>{
+//     TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeMunicipiosData"
+//     PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeMunicipiosData"
+//
+//     url = PRODUCTION_URL
+//     fetch(url,{method:'GET'})
+//       .then(data=>{
+//           console.log("Success adding today's data to history: "+Object.keys(data))
+//           return data
+//         })
+//       .catch(error=>{
+//         console.log("Error adding today's data to history: "+error)
+//         return error
+//       })
+//
+// });
 
 
 exports.logTodaysDataToHistory = functions.https.onRequest((request, response) => {
@@ -320,6 +324,114 @@ exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
       })
 
 });
+
+const getTodaysMessage = async () =>{
+
+
+  let ref = admin.firestore().doc("data/todaysData")
+  let todaysData =
+  ref.get()
+  .then(snapshot=>{
+    if (snapshot.exists){
+      let data = snapshot.data()
+      return data
+    } else{
+      return {noDataAvailable:true}
+    }
+  })
+
+
+  const historicalDataRef = admin.firestore().doc('data/historicalData');
+
+  let historicalDataFromFireBase =
+  historicalDataRef.get()
+  .then(snapshot=>{
+    if (snapshot.exists){
+      const historicalData = snapshot.data().all
+      const lengthOfData = historicalData.length
+      return {
+        all:historicalData,
+        newCasesToday:historicalData[lengthOfData-1].confirmedCases - historicalData[lengthOfData-2].confirmedCases,
+        newDeathsToday:historicalData[lengthOfData-1].deaths - historicalData[lengthOfData-2].deaths,
+        newMolecularTestsToday:historicalData[lengthOfData-1].molecularTests - historicalData[lengthOfData-2].molecularTests,
+        newSerologicalTestsToday:historicalData[lengthOfData-1].serologicalTests - historicalData[lengthOfData-2].serologicalTests,
+        }
+    }
+    else{
+      return {dataAvailable:false}
+    }
+  })
+
+  return Promise.all([todaysData,historicalDataFromFireBase])
+  .then(data=>{
+    let today = data[0]
+    let historical = data[1]
+    var message = `Tracker COVID-19 Puerto Rico\n`
+    message += `Casos positivos: ${formatInteger(today.confirmedCases)} (+${formatInteger(historical.newCasesToday)} hoy)\n`
+    message += `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n`
+    message += "- - - - - - \n"
+    message += `${today.saludTimeSignature}`
+
+    return message
+
+    })
+  .catch(error=>error)
+}
+
+
+
+
+
+const accountSid = keys.twilio.twilio_account_sid; // Your Account SID from www.twilio.com/console
+const authToken = keys.twilio.twilio_auth_token;   // Your Auth Token from www.twilio.com/console
+
+const twilio = require('twilio');
+const client = new twilio(accountSid, authToken);
+
+const sendSMS = async (message,number) => {
+
+  client.messages.create({
+      body: message,
+      to: number,  // Text this number
+      from: '+12058096622' // From a valid Twilio number
+  })
+  .then((message) => {
+    console.log(message.sid)
+    return message.sid
+  })
+  .catch(error=>error);
+}
+
+
+exports.sendAllSMS = functions.https.onRequest(async(request, response) => {
+  let message = await getTodaysMessage()
+  let NUMBERS = keys.twilio.test_numbers
+  for (var i = 0; i < NUMBERS.length; i++) {
+    let destination = NUMBERS[i]
+    sendSMS(message,destination)
+  }
+  return response.send("Executed all SMS messages")
+
+});
+
+exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/sendAllSMS"
+
+    url = PRODUCTION_URL
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success sending SMS message today:"+data)
+          return data
+        })
+      .catch(error=>{
+        console.log("Error sending today's SMS"+error)
+        return error
+      })
+
+});
+
 
 // exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
 //   let documentRef = admin.firestore().doc('data/historicalData');
