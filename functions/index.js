@@ -22,9 +22,6 @@ const util = require('util')
 const salud_web_site_url = "http://www.salud.gov.pr/Pages/coronavirus.aspx"
 const NUMBERS = "0123456789"
 
-exports.helloWorld = functions.https.onRequest((request, response) => {
- response.send("Hello from Firebase! ^_^");
-});
 
 cleanString = (text) =>{
   var output = ""
@@ -40,8 +37,14 @@ const formatInteger = (number)=>{
   return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+const getCurrentESTTime = () =>{
+  let time = new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'})
+  return time
+}
+
+
 exports.serverTimeCheck = functions.https.onRequest((request, response) => {
- response.send(new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'}));
+ response.send(getCurrentESTTime());
 });
 
 
@@ -61,27 +64,16 @@ getTimeStamp = ()=>{
 }
 
 
-exports.newScrape = functions.https.onRequest((request, response) => {
-  var x = Xray()
-
-  scrapingSaludTimeSignature = new Promise((resolve,reject)=>{
-    x("https://www.covid19prdata.org/dashboard", ['h5'])((error,items)=>{
-      if (error){
-        reject(error)
-      } else{
-        resolve(items)
-      }
-    })
-  })
-
-  scrapingSaludTimeSignature.then(data=>response.send(data))
-  .catch(error=>response.send("ERROR:"+error))
-});
 
 
 
+exports.scrapeTodaysData = functions.https.onRequest(async (request, response) => {
+  let dataFresh = await isTodaysDataFresh()
+  if (dataFresh){
+    return response.send({"message":"Data is fresh,no scrape needed"})
+  }
 
-exports.scrapeTodaysData = functions.https.onRequest((request, response) => {
+
   var x = Xray()
 
   scrapingSaludTimeSignature = new Promise((resolve,reject)=>{
@@ -139,6 +131,22 @@ TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeT
 PRODUCTION_URL = " https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeTodaysData"
 
 exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+  url = PRODUCTION_URL
+  fetch(url,{method:'GET'})
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping today's number: "+error)
+    return error
+  })
+
+});
+
+exports.secondScheduledScrapeTodaysData = functions.pubsub.schedule('30 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
   url = PRODUCTION_URL
@@ -325,6 +333,62 @@ exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
 
 });
 
+
+exports.secondScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/logTodaysDataToHistory"
+    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/logTodaysDataToHistory"
+
+    url = PRODUCTION_URL
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success adding today's data to history: "+Object.keys(data))
+          return data
+        })
+      .catch(error=>{
+        console.log("Error adding today's data to history: "+error)
+        return error
+      })
+
+});
+
+
+const isTodaysDataFresh = async () => {
+  let ref = admin.firestore().doc("data/todaysData")
+  let todaysData = await
+  ref.get()
+  .then(snapshot=>{
+    if (snapshot.exists){
+      let data = snapshot.data()
+      return data
+    } else{
+      return {noDataAvailable:true}
+    }
+  })
+
+  let currentESTTime = getCurrentESTTime()
+
+  let saludTimeSignature = todaysData.saludTimeSignature.trim()
+
+  // get date of saludTimeSignature
+  const locationOfAl = saludTimeSignature.indexOf("al ")
+  const dateNumberStart = locationOfAl + 3
+  const dateNumberEnd = saludTimeSignature[dateNumberStart+1] === " " ? dateNumberStart+1 : dateNumberStart+2
+
+  const saludDayOfMonth = parseInt(saludTimeSignature.substring(dateNumberStart,dateNumberEnd))
+  const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
+  console.log("Today is ",saludDayOfMonth)
+  console.log("Data's today is",saludDayOfMonth)
+
+  const dataIsTodayFresh = saludDayOfMonth === todaysDayOfMonth
+  console.log("Dates match?: ",dataIsTodayFresh)
+
+  return dataIsTodayFresh
+
+}
+
+
 const getTodaysMessage = async () =>{
 
 
@@ -362,15 +426,26 @@ const getTodaysMessage = async () =>{
     }
   })
 
-  return Promise.all([todaysData,historicalDataFromFireBase])
+
+  return Promise.all([todaysData,historicalDataFromFireBase,isTodaysDataFresh()])
   .then(data=>{
+    let currentESTTime = getCurrentESTTime()
+    console.log("currentESTTime",currentESTTime)
+
     let today = data[0]
+    let saludTimeSignature = today.saludTimeSignature.trim()
+
+    const dataIsTodayFresh = data[2]
+
+
     let historical = data[1]
     var message = `Tracker COVID-19 Puerto Rico\n`
-    message += `Casos positivos: ${formatInteger(today.confirmedCases)} (+${formatInteger(historical.newCasesToday)} hoy)\n`
-    message += `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n`
+    let positiveCasesToday = `Casos positivos: ${formatInteger(today.confirmedCases)} (+${formatInteger(historical.newCasesToday)} hoy)\n`
+    let deathsToday = `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n`
+    message += positiveCasesToday + deathsToday
     message += "- - - - - - \n"
-    message += `${today.saludTimeSignature}`
+    message += `${saludTimeSignature}\n`
+    message += dataIsTodayFresh ? "Data is fresh :)" : "Data is NOT fresh :("
 
     return message
 
@@ -405,6 +480,7 @@ const sendSMS = async (message,number) => {
 
 exports.sendAllSMS = functions.https.onRequest(async(request, response) => {
   let message = await getTodaysMessage()
+  console.log("message is",message)
   let NUMBERS = keys.twilio.test_numbers
   for (var i = 0; i < NUMBERS.length; i++) {
     let destination = NUMBERS[i]
@@ -432,37 +508,66 @@ exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
 
 });
 
-
+//24 abril to 4 mayo
+// let missingData = [
+//   {confirmedCases:0,timestamp:"3/12/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:3,timestamp:"3/13/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:4,timestamp:"3/14/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:5,timestamp:"3/15/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:"dataNotPublished",timestamp:"3/16/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:5,timestamp:"3/17/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:6,timestamp:"3/18/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:6,timestamp:"3/19/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:14,timestamp:"3/20/2020, 7:00:00 AM",deaths:0},
+//   {confirmedCases:21,timestamp:"3/21/2020, 7:00:00 AM",deaths:1},
+// {confirmedCases:23,timestamp:"3/22/2020, 7:00:00 AM",deaths:1},
+// {confirmedCases:31,timestamp:"3/23/2020, 7:00:00 AM",deaths:2},
+// {confirmedCases:39,timestamp:"3/24/2020, 7:00:00 AM",deaths:2},
+// {confirmedCases:51,timestamp:"3/25/2020, 7:00:00 AM",deaths:2},
+// {confirmedCases:64,timestamp:"3/26/2020, 7:00:00 AM",deaths:2},
+// {confirmedCases:79,timestamp:"3/27/2020, 7:00:00 AM",deaths:3},
+// {confirmedCases:100,timestamp:"3/28/2020, 7:00:00 AM",deaths:3},
+// {confirmedCases:127,timestamp:"3/29/2020, 7:00:00 AM",deaths:5},
+// {confirmedCases:174,timestamp:"3/30/2020, 7:00:00 AM",deaths:6},
+// {confirmedCases:239,timestamp:"3/31/2020, 7:00:00 AM",deaths:8},
+// {confirmedCases:286,timestamp:"4/1/2020, 7:00:00 AM",deaths:11},
+// {confirmedCases:316,timestamp:"4/2/2020, 7:00:00 AM",deaths:12},
+// {confirmedCases:378,timestamp:"4/3/2020, 7:00:00 AM",deaths:15},
+// {confirmedCases:452,timestamp:"4/4/2020, 7:00:00 AM",deaths:18},
+// {confirmedCases:475,timestamp:"4/5/2020, 7:00:00 AM",deaths:20},
+// {confirmedCases:513,timestamp:"4/6/2020, 7:00:00 AM",deaths:21},
+//
+// ]
+//
 // exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
 //   let documentRef = admin.firestore().doc('data/historicalData');
 //   documentRef.get()
 //   .then(snapshot=>{
+//     var gap_i = 0
+//
 //     if (snapshot.exists){
 //       var data = snapshot.data() // list of data per day
 //       data = data.all
-//       var cleanData = []
-//       for (var i = 0; i < data.length; i++) {
-//         var dataObject = data[i]
-//         console.log(dataObject)
-//         const confirmedCases = dataObject.confirmedCases
-//         const timestamp = dataObject.timestamp
-//         var newDataObject = {confirmedCases:confirmedCases,timestamp:timestamp}
-//         if (day == 12){
-//           newDataObject.conductedTests = 7973
-//           newDataObject.testsInProgress = 1251
-//           newDataObject.negativeCases = 5819
-//           newDataObject.deaths = 44
-//         }
-//         else if (day == 13){
-//           newDataObject.conductedTests = 8157
-//           newDataObject.testsInProgress = 1288
-//           newDataObject.negativeCases = 5960
-//           newDataObject.deaths = 45
-//         }
-//         cleanData.push(newDataObject)
-//       }
-//     console.log("Clean data is\n",cleanData)
-//     return documentRef.set({all:cleanData})
+//       console.log("----OG DATA")
+//       data.forEach((item, i) => {
+//         console.log(item)
+//       });
+//
+//       console.log("----OG DATA END --")
+//
+//     console.log("gap_i is ",gap_i)
+//     console.log("data is",data.length, "long")
+//     var newAll = []
+//     if (gap_i === 0){
+//       newAll = missingData.concat(data)
+//     } else{
+//       newAll = data
+//       console.log("new all is data")
+//     }
+//     console.log("newAll is",newAll.length, "long")
+//
+//
+//     return documentRef.set({all:newAll})
 //     }
 //     else{
 //       return "Data not found"
