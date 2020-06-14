@@ -1,28 +1,29 @@
 const functions = require('firebase-functions');
 var admin = require("firebase-admin");
 var keys = require("./privateKey.json")
-// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
+// Used to scrape webpages that have not been certified
 const https = require("https");
 const agent = new https.Agent({
   rejectUnauthorized: false
 })
 
+// Initialize firebase app
 admin.initializeApp({
   credential: admin.credential.cert(keys.firebase),
   databaseURL: "https://covid19puertorico-1a743.firebaseio.com"
 });
 
-
+// Used for web scraping
 var Xray = require('x-ray')
 var fetch = require("node-fetch");
 const util = require('util')
 
 
-const salud_web_site_url = "http://www.salud.gov.pr/Pages/coronavirus.aspx"
+const PR_HEALTH_DEPT_COVID_URL = "http://www.salud.gov.pr/Pages/coronavirus.aspx"
 const NUMBERS = "0123456789"
 
-
+// Helper Functions
 cleanString = (text) =>{
   var output = ""
   for (var i = 0; i < text.length; i++) {
@@ -48,8 +49,8 @@ exports.serverTimeCheck = functions.https.onRequest((request, response) => {
 });
 
 
-
-DATA_LABELS = ["confirmedCases","molecularTests","serologicalTests","deaths"]
+// Labels for columns as they appear on health dept site table
+DATA_LABELS = ["confirmedCases","probableCases","deaths"]
 
 attachLabels = (data,labels) =>{
   output = {}
@@ -63,21 +64,17 @@ getTimeStamp = ()=>{
   return new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'});
 }
 
-
-
-
-
+// Primary method for scraping daily method.
 exports.scrapeTodaysData = functions.https.onRequest(async (request, response) => {
   let dataFresh = await isTodaysDataFresh()
   if (dataFresh){
     return response.send({"message":"Data is fresh,no scrape needed"})
   }
 
-
   var x = Xray()
 
   scrapingSaludTimeSignature = new Promise((resolve,reject)=>{
-    x(salud_web_site_url, '.ms-rteElement-H3B')((error,items)=>{
+    x(PR_HEALTH_DEPT_COVID_URL, '.ms-rteElement-H3B')((error,items)=>{
       if (error){
         reject(error)
       } else{
@@ -89,7 +86,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
   scrapingSaludTimeSignature
   .then(saludTimeSignature=>{
     scrapingData = new Promise((resolve,reject)=>{
-      x(salud_web_site_url, ['.ms-rteElement-H2B'])((error,items)=>{
+      x(PR_HEALTH_DEPT_COVID_URL, ['.ms-rteElement-H2B'])((error,items)=>{
       if (error){
         reject(error)
       } else{
@@ -103,6 +100,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
     items = data.items
     console.log("items are",items)
     saludTimeSignature = data.saludTimeSignature
+    console.log("saludTimeSignature is",saludTimeSignature)
     integers = []
     for (var i = 0; i < items.length; i++) {
       string = items[i]
@@ -146,6 +144,7 @@ exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
 
 });
 
+// Second scrape in case data was updated later by PR health dept
 exports.secondScheduledScrapeTodaysData = functions.pubsub.schedule('30 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
@@ -162,8 +161,9 @@ exports.secondScheduledScrapeTodaysData = functions.pubsub.schedule('30 12 * * *
 
 });
 
-
-// exports.playground = functions.https.onRequest((request, response) => {
+//
+// exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
+//   console.log("Scraiping data for municipios")
 //   var x = Xray()
 //   datesURL = "https://github.com/Code4PuertoRico/covid19-pr-api/tree/master/data"
 //
@@ -177,92 +177,71 @@ exports.secondScheduledScrapeTodaysData = functions.pubsub.schedule('30 12 * * *
 //     })
 //   })
 //
-//   gettingDates.then(data=>response.send(data)).catch(error=>response.send(error))
+//
+//   gettingDates
+//   .then(dates=>{
+//     lastDate = dates[dates.length - 1]
+//     console.log("Last date is "+lastDate)
+//
+//     splitUp = lastDate.split("-") // date is in form 04-11-2020
+//     month = parseInt(splitUp[0]) // has to be in single digit form for URL, others don't
+//     day = splitUp[1]
+//     year = splitUp[2]
+//
+//     const url = `https://raw.githubusercontent.com/Code4PuertoRico/covid19-pr-api/master/data/PuertoRicoTaskForce/${month}-${day}-${year}/CSV/municipios.csv`
+//     console.log(`GET ${url}`)
+//     return fetch(url,{method:'GET'})
+//   })
+//   .then(data=>{
+//     return data.buffer()
+//   })
+//   .then(buffer=>{
+//     var text = buffer.toString()
+//     // clean out quote chars
+//     text = text.replace(/"/g, '')
+//     var rows = text.split("\n")
+//     console.log("ROWS",rows)
+//     for (var i = 0; i < rows.length; i++) {
+//       rows[i] = rows[i].split(",")
+//     }
+//     var municipiosData = {}
+//     for (var j = 2; j < rows.length; j++) {
+//       const row = rows[j]
+//       console.log(`Row is ${row}`)
+//       const MUNICIPIO_NAME_i = 0
+//       const CONFIRMED_CASES_i = 1
+//
+//       var muncipioName = row[MUNICIPIO_NAME_i].slice(0,-1)
+//       // correct municipio names
+//       nameCorrections = {"Afasco":"Añasco","Bayamon":"Bayamón","Catano":"Cataño",
+//       "Guanica":"Guánica","Loiza":"Loíza","Manati":"Manatí","Mayaguez":"Mayagüez",
+//       "Rincon":"Rincón","Sabana Grande":"Sábana Grande","San German":"San Germán",
+//       "San Sebastian":"San Sebastián"}
+//       if (muncipioName in nameCorrections){
+//         muncipioName = nameCorrections[muncipioName]
+//       }
+//
+//
+//       const confirmedCases = parseInt(row[CONFIRMED_CASES_i])
+//       if (muncipioName.length > 0){
+//         municipiosData[muncipioName] = {confirmedCases:confirmedCases}
+//       }
+//     }
+//     return municipiosData
+//   })
+//   .then(municipiosData=>{
+//     municipiosData["timestamp"] = getTimeStamp()
+//
+//     let ref = admin.firestore().doc("data/municipios")
+//     return ref.set({all:municipiosData})
+//
+//   })
+//   .then(data=>response.send(data))
+//   .catch(error=>{
+//     return response.send(error)
+//   })
 //
 // });
-
-
-
-exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
-  console.log("Scraiping data for municipios")
-  var x = Xray()
-  datesURL = "https://github.com/Code4PuertoRico/covid19-pr-api/tree/master/data"
-
-  gettingDates = new Promise((resolve,reject)=>{
-    x(datesURL, 'ol',['li'])((error,items)=>{
-      if (error){
-        reject(error)
-      } else{
-        resolve(items)
-      }
-    })
-  })
-
-
-  gettingDates
-  .then(dates=>{
-    lastDate = dates[dates.length - 1]
-    console.log("Last date is "+lastDate)
-
-    splitUp = lastDate.split("-") // date is in form 04-11-2020
-    month = parseInt(splitUp[0]) // has to be in single digit form for URL, others don't
-    day = splitUp[1]
-    year = splitUp[2]
-
-    const url = `https://raw.githubusercontent.com/Code4PuertoRico/covid19-pr-api/master/data/PuertoRicoTaskForce/${month}-${day}-${year}/CSV/municipios.csv`
-    console.log(`GET ${url}`)
-    return fetch(url,{method:'GET'})
-  })
-  .then(data=>{
-    return data.buffer()
-  })
-  .then(buffer=>{
-    var text = buffer.toString()
-    // clean out quote chars
-    text = text.replace(/"/g, '')
-    var rows = text.split("\n")
-    console.log("ROWS",rows)
-    for (var i = 0; i < rows.length; i++) {
-      rows[i] = rows[i].split(",")
-    }
-    var municipiosData = {}
-    for (var j = 2; j < rows.length; j++) {
-      const row = rows[j]
-      console.log(`Row is ${row}`)
-      const MUNICIPIO_NAME_i = 0
-      const CONFIRMED_CASES_i = 1
-
-      var muncipioName = row[MUNICIPIO_NAME_i].slice(0,-1)
-      // correct municipio names
-      nameCorrections = {"Afasco":"Añasco","Bayamon":"Bayamón","Catano":"Cataño",
-      "Guanica":"Guánica","Loiza":"Loíza","Manati":"Manatí","Mayaguez":"Mayagüez",
-      "Rincon":"Rincón","Sabana Grande":"Sábana Grande","San German":"San Germán",
-      "San Sebastian":"San Sebastián"}
-      if (muncipioName in nameCorrections){
-        muncipioName = nameCorrections[muncipioName]
-      }
-
-
-      const confirmedCases = parseInt(row[CONFIRMED_CASES_i])
-      if (muncipioName.length > 0){
-        municipiosData[muncipioName] = {confirmedCases:confirmedCases}
-      }
-    }
-    return municipiosData
-  })
-  .then(municipiosData=>{
-    municipiosData["timestamp"] = getTimeStamp()
-
-    let ref = admin.firestore().doc("data/municipios")
-    return ref.set({all:municipiosData})
-
-  })
-  .then(data=>response.send(data))
-  .catch(error=>{
-    return response.send(error)
-  })
-
-});
 
 //
 // exports.scheduledMunicipioScrape = functions.pubsub.schedule('35 9 * * *')
@@ -284,7 +263,6 @@ exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => 
 //
 // });
 
-
 exports.logTodaysDataToHistory = functions.https.onRequest((request, response) => {
   let ref = admin.firestore().doc("data/todaysData")
   ref.get()
@@ -303,7 +281,7 @@ exports.logTodaysDataToHistory = functions.https.onRequest((request, response) =
     )
   })
     .then(data => {
-      return response.send("Updated data succesfully")
+      return response.send("Updated history succesfully")
     })
     .catch(error=>{
       const errorMessage = "Error updating historical data\n"+error
@@ -391,7 +369,6 @@ const isTodaysDataFresh = async () => {
 
 const getTodaysMessage = async () =>{
 
-
   let ref = admin.firestore().doc("data/todaysData")
   let todaysData =
   ref.get()
@@ -463,7 +440,45 @@ const authToken = keys.twilio.twilio_auth_token;   // Your Auth Token from www.t
 const twilio = require('twilio');
 const client = new twilio(accountSid, authToken);
 
-const sendSMS = async (message,number) => {
+const sendFB = async (message,PSID) =>{
+
+  console.log("Sending FB message ...")
+  console.log("access token is ",keys.facebook.access_token)
+
+  const body = {
+    access_token: keys.facebook.access_token,
+    recipient: {
+      id: PSID
+    },
+    message: {
+      text: message,
+      quick_replies:[
+              {
+                content_type:"text",
+                title:"Sí",
+                payload:"yes",
+                // "image_url":"http://example.com/img/red.png"
+              },{
+                content_type:"text",
+                title:"No",
+                payload:"no",
+                // "image_url":"http://example.com/img/green.png"
+              }
+            ]
+    }
+	};
+
+
+
+  return fetch('https://graph.facebook.com/v7.0/me/messages', {
+  		method: 'post',
+  		body: JSON.stringify(body),
+  		headers: {'Content-Type': 'application/json'}
+});
+}
+
+
+const sendSMS = async (number,message) => {
 
   client.messages.create({
       body: message,
@@ -507,6 +522,47 @@ exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
       })
 
 });
+
+
+exports.addPSID = functions.https.onRequest(async(request, response) => {
+  let documentRef = admin.firestore().doc('users/PSIDs');
+  let newPSID = request.query.PSID
+  return documentRef.update(
+    'all', admin.firestore.FieldValue.arrayUnion(newPSID)
+  ).then(data => {
+        return response.send({"status":"succes","notes":"Added new PSID succesfully"})
+      })
+});
+
+exports.removePSID = functions.https.onRequest(async(request, response) => {
+  let documentRef = admin.firestore().doc('users/PSIDs');
+  let existingPSID = request.query.PSID
+  return documentRef.update(
+    'all', admin.firestore.FieldValue.arrayRemove(existingPSID)
+  ).then(data => {
+        return response.send({"status":"success","notes":"Removed PSID successfully"})
+      })
+});
+
+exports.sendFBMessageToPSID = functions.https.onRequest(async(request, response) => {
+  let reply = await sendFB(request.query.PSID,request.query.message)
+  return response.send(reply)
+});
+
+exports.scheduledFBQA = functions.pubsub.schedule('30 10 * * *')
+  .timeZone('America/La_Paz')
+  .onRun( async (context)=>{
+    let message = await getTodaysMessage()
+    let PSIDs = keys.facebook.test_psids
+    for (var i = 0; i < PSIDs.length; i++) {
+      let destination = PSIDs[i]
+      sendFB(message,destination)
+    }
+    return response.send("Executed all FB messages")
+
+  });
+
+
 
 //24 abril to 4 mayo
 // let missingData = [
