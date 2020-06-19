@@ -50,7 +50,7 @@ exports.serverTimeCheck = functions.https.onRequest((request, response) => {
 
 
 // Labels for columns as they appear on health dept site table
-DATA_LABELS = ["confirmedCases","probableCases","deaths"]
+DATA_LABELS = ["molecularPositive","serologicalPositive","deaths"]
 
 attachLabels = (data,labels) =>{
   output = {}
@@ -113,6 +113,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
     timestamp = getTimeStamp()
     labeledData["saludTimeSignature"] = saludTimeSignature
     labeledData["timestamp"] = timestamp
+    labeledData.totalPositive = labeledData.molecularPositive+labeledData.serologicalPositive
 
     let ref = admin.firestore().doc("data/todaysData")
     return ref.set(labeledData)
@@ -599,27 +600,75 @@ exports.scheduledFBQA = functions.pubsub.schedule('30 10 * * *')
 //   let documentRef = admin.firestore().doc('data/historicalData');
 //   documentRef.get()
 //   .then(snapshot=>{
-//     var gap_i = 0
 //
 //     if (snapshot.exists){
 //       var data = snapshot.data() // list of data per day
-//       data = data.all
+//       let originalAll = data.all
 //       console.log("----OG DATA")
-//       data.forEach((item, i) => {
+//       originalAll.forEach((item, i) => {
 //         console.log(item)
 //       });
 //
 //       console.log("----OG DATA END --")
 //
-//     console.log("gap_i is ",gap_i)
-//     console.log("data is",data.length, "long")
+//     console.log("data is",originalAll.length, "long")
 //     var newAll = []
-//     if (gap_i === 0){
-//       newAll = missingData.concat(data)
-//     } else{
-//       newAll = data
-//       console.log("new all is data")
+//
+//     //clean each data entry
+//     for (var i = 0; i < originalAll.length; i++) {
+//       let originalEntry = originalAll[i]
+//       var newEntry = {...originalEntry}
+//
+//       var totalPositive = 0
+//
+//       if ('molecularTests' in originalEntry && 'serologicalTests' in originalEntry){
+//
+//         let molecularPositive = originalEntry.molecularTests
+//         let serologicalPositive = originalEntry.serologicalTests
+//
+//         totalPositive += molecularPositive
+//         totalPositive += serologicalPositive
+//
+//
+//         // Change
+//         delete newEntry.confirmedCases
+//         delete newEntry.molecularTests
+//         delete newEntry.serologicalTests
+//
+//         newEntry = {...newEntry,totalPositive:totalPositive,
+//                         molecularPositive:molecularPositive,
+//                         serologicalPositive:serologicalPositive}
+//       }
+//       else if ('probableCases' in originalEntry){
+//         let molecularPositive = originalEntry.confirmedCases
+//         let serologicalPositive = originalEntry.probableCases
+//
+//         totalPositive += molecularPositive
+//         totalPositive += serologicalPositive
+//
+//
+//         // Change
+//         delete newEntry.confirmedCases
+//         delete newEntry.probableCases
+//         newEntry = {...newEntry,totalPositive:totalPositive,
+//                         molecularPositive:molecularPositive,
+//                         serologicalPositive:serologicalPositive}
+//
+//
+//       }
+//       else {
+//         totalPositive = originalEntry.confirmedCases
+//         // Change
+//         delete newEntry.confirmedCases
+//         newEntry = {...newEntry,totalPositive:totalPositive}
+//       }
+//
+//       newAll.push(newEntry)
 //     }
+//
+//
+//
+//
 //     console.log("newAll is",newAll.length, "long")
 //
 //
@@ -633,7 +682,7 @@ exports.scheduledFBQA = functions.pubsub.schedule('30 10 * * *')
 //   .catch(error=>response.send(error))
 // });
 
-
+//
 //
 // exports.loadSampleHistoricalData = functions.https.onRequest((request, response) => {
 //   beginnerData = [
