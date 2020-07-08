@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "oauth": "^0.9.15",
+    "twitter": "^1.7.1"
+  }
+}

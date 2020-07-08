@@ -126,13 +126,12 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
   })
 });
 
-TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeTodaysData"
-PRODUCTION_URL = " https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeTodaysData"
+PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net"
 
 exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-  url = PRODUCTION_URL
+  url = `${PRODUCTION_URL}/scrapeTodaysData`
   fetch(url,{method:'GET'})
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
@@ -149,7 +148,7 @@ exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
 exports.secondScheduledScrapeTodaysData = functions.pubsub.schedule('30 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-  url = PRODUCTION_URL
+  url = `${PRODUCTION_URL}/scrapeTodaysData`
   fetch(url,{method:'GET'})
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
@@ -296,10 +295,7 @@ exports.logTodaysDataToHistory = functions.https.onRequest((request, response) =
 exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-    TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/logTodaysDataToHistory"
-    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/logTodaysDataToHistory"
-
-    url = PRODUCTION_URL
+    var url = `${PRODUCTION_URL}/logTodaysDataToHistory`
     fetch(url,{method:'GET'})
       .then(data=>{
           console.log("Success adding today's data to history: "+Object.keys(data))
@@ -316,10 +312,8 @@ exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
 exports.secondScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-    TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/logTodaysDataToHistory"
-    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/logTodaysDataToHistory"
 
-    url = PRODUCTION_URL
+    var url = `${PRODUCTION_URL}/logTodaysDataToHistory`
     fetch(url,{method:'GET'})
       .then(data=>{
           console.log("Success adding today's data to history: "+Object.keys(data))
@@ -357,8 +351,8 @@ const isTodaysDataFresh = async () => {
 
   const saludDayOfMonth = parseInt(saludTimeSignature.substring(dateNumberStart,dateNumberEnd))
   const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
-  console.log("Today is ",saludDayOfMonth)
-  console.log("Data's today is",saludDayOfMonth)
+  console.log("Today's day of month is ",saludDayOfMonth)
+  console.log("Data's day of month for today is",saludDayOfMonth)
 
   const dataIsTodayFresh = saludDayOfMonth === todaysDayOfMonth
   console.log("Dates match?: ",dataIsTodayFresh)
@@ -368,7 +362,7 @@ const isTodaysDataFresh = async () => {
 }
 
 
-const getTodaysMessage = async () =>{
+const getTodaysMessage = async (messageType) =>{
 
   let ref = admin.firestore().doc("data/todaysData")
   let todaysData =
@@ -383,6 +377,7 @@ const getTodaysMessage = async () =>{
   })
 
 
+
   const historicalDataRef = admin.firestore().doc('data/historicalData');
 
   let historicalDataFromFireBase =
@@ -393,10 +388,10 @@ const getTodaysMessage = async () =>{
       const lengthOfData = historicalData.length
       return {
         all:historicalData,
-        newCasesToday:historicalData[lengthOfData-1].confirmedCases - historicalData[lengthOfData-2].confirmedCases,
+        newPositivesToday:historicalData[lengthOfData-1].totalPositive - historicalData[lengthOfData-2].totalPositive,
         newDeathsToday:historicalData[lengthOfData-1].deaths - historicalData[lengthOfData-2].deaths,
-        newMolecularTestsToday:historicalData[lengthOfData-1].molecularTests - historicalData[lengthOfData-2].molecularTests,
-        newSerologicalTestsToday:historicalData[lengthOfData-1].serologicalTests - historicalData[lengthOfData-2].serologicalTests,
+        newMolecularPositiveToday:historicalData[lengthOfData-1].molecularPositive - historicalData[lengthOfData-2].molecularPositive,
+        newSerologicalPositiveToday:historicalData[lengthOfData-1].serologicalPositive - historicalData[lengthOfData-2].serologicalPositive,
         }
     }
     else{
@@ -412,18 +407,30 @@ const getTodaysMessage = async () =>{
 
     let today = data[0]
     let saludTimeSignature = today.saludTimeSignature.trim()
+    let leadingText = "(Datos al "
+    let leadingTextIndex = saludTimeSignature.indexOf(leadingText)
+    let justSaludDate = saludTimeSignature.substring(leadingTextIndex+leadingText.length,saludTimeSignature.length - 1)
 
     const dataIsTodayFresh = data[2]
 
 
     let historical = data[1]
-    var message = `Tracker COVID-19 Puerto Rico\n`
-    let positiveCasesToday = `Casos positivos: ${formatInteger(today.confirmedCases)} (+${formatInteger(historical.newCasesToday)} hoy)\n`
-    let deathsToday = `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n`
-    message += positiveCasesToday + deathsToday
+    var message = `COVIDTrackerPR.com\n${justSaludDate}\n\n`
+    message += `Total de cosas positivos: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
+    // message += `-->Positivos pruebas moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
+    // message += `-->Positivos pruebas serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
+
+    message += `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n\n`
+
+    if (messageType === "twitter"){
+      message += "#COVIDー19 #PuertoRico #coronavirus\n"
+    }
     message += "- - - - - - \n"
-    message += `${saludTimeSignature}\n`
-    message += dataIsTodayFresh ? "Data is fresh :)" : "Data is NOT fresh :("
+    message += "Datos obtenidos del Departamento de Salud"
+    //message += `Data for today ${currentESTTime.substring(0,currentESTTime.indexOf(','))}`
+    // ^ date in m/d/y
+    // message += dataIsTodayFresh ? "Data is fresh :)" : "Data is NOT fresh :("
+
 
     return message
 
@@ -480,38 +487,43 @@ const sendFB = async (message,PSID) =>{
 
 
 const sendSMS = async (number,message) => {
-
+  console.log(`Sending message to ${number}`)
   client.messages.create({
       body: message,
       to: number,  // Text this number
-      from: '+12058096622' // From a valid Twilio number
+      from: "+12058096622" // From a valid Twilio number
   })
   .then((message) => {
-    console.log(message.sid)
+    console.log(`Success sending message. SID:${message.sid}`)
     return message.sid
   })
-  .catch(error=>error);
+  .catch(error=>{
+    console.log(`Error sending message:${error}`)
+    });
 }
 
 
 exports.sendAllSMS = functions.https.onRequest(async(request, response) => {
   let message = await getTodaysMessage()
-  console.log("message is",message)
+  console.log("MESSAGES IS\n",message)
+  console.log("END MESSAGE")
   let NUMBERS = keys.twilio.test_numbers
+  var sentMessageSIDs = []
   for (var i = 0; i < NUMBERS.length; i++) {
     let destination = NUMBERS[i]
-    sendSMS(message,destination)
+    sentMessageSIDs.push(sendSMS(destination,message))
   }
-  return response.send("Executed all SMS messages")
+  return Promise.all(sentMessageSIDs).then(sids=>response.send("Executed all SMS messages successfully"))
+  .catch(error=>response.send("Error sending SMS messages\n"+error))
+
 
 });
 
 exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-    PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/sendAllSMS"
 
-    url = PRODUCTION_URL
+    url = `${PRODUCTION_URL}/sendAllSMS`
     fetch(url,{method:'GET'})
       .then(data=>{
           console.log("Success sending SMS message today:"+data)
@@ -564,38 +576,61 @@ exports.scheduledFBQA = functions.pubsub.schedule('30 10 * * *')
   });
 
 
+const postTweet = async (message)=>{
+  var Twitter = require('twitter');
+  var twitterClient = new Twitter({
+    consumer_key: keys.twitter.consumer_key,
+    consumer_secret: keys.twitter.consumer_secret,
+    access_token_key: keys.twitter.access_token_key,
+    access_token_secret: keys.twitter.access_token_secret
+  });
 
-//24 abril to 4 mayo
-// let missingData = [
-//   {confirmedCases:0,timestamp:"3/12/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:3,timestamp:"3/13/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:4,timestamp:"3/14/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:5,timestamp:"3/15/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:"dataNotPublished",timestamp:"3/16/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:5,timestamp:"3/17/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:6,timestamp:"3/18/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:6,timestamp:"3/19/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:14,timestamp:"3/20/2020, 7:00:00 AM",deaths:0},
-//   {confirmedCases:21,timestamp:"3/21/2020, 7:00:00 AM",deaths:1},
-// {confirmedCases:23,timestamp:"3/22/2020, 7:00:00 AM",deaths:1},
-// {confirmedCases:31,timestamp:"3/23/2020, 7:00:00 AM",deaths:2},
-// {confirmedCases:39,timestamp:"3/24/2020, 7:00:00 AM",deaths:2},
-// {confirmedCases:51,timestamp:"3/25/2020, 7:00:00 AM",deaths:2},
-// {confirmedCases:64,timestamp:"3/26/2020, 7:00:00 AM",deaths:2},
-// {confirmedCases:79,timestamp:"3/27/2020, 7:00:00 AM",deaths:3},
-// {confirmedCases:100,timestamp:"3/28/2020, 7:00:00 AM",deaths:3},
-// {confirmedCases:127,timestamp:"3/29/2020, 7:00:00 AM",deaths:5},
-// {confirmedCases:174,timestamp:"3/30/2020, 7:00:00 AM",deaths:6},
-// {confirmedCases:239,timestamp:"3/31/2020, 7:00:00 AM",deaths:8},
-// {confirmedCases:286,timestamp:"4/1/2020, 7:00:00 AM",deaths:11},
-// {confirmedCases:316,timestamp:"4/2/2020, 7:00:00 AM",deaths:12},
-// {confirmedCases:378,timestamp:"4/3/2020, 7:00:00 AM",deaths:15},
-// {confirmedCases:452,timestamp:"4/4/2020, 7:00:00 AM",deaths:18},
-// {confirmedCases:475,timestamp:"4/5/2020, 7:00:00 AM",deaths:20},
-// {confirmedCases:513,timestamp:"4/6/2020, 7:00:00 AM",deaths:21},
-//
-// ]
-//
+
+  return twitterClient.post('statuses/update', {status: message})
+    .then(function (tweet) {
+      console.log(tweet);
+      return tweet
+    })
+    .catch(function (error) {
+      console.log(error);
+      return error
+    })
+}
+
+exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
+
+  let dataFresh = await isTodaysDataFresh()
+
+  if (dataFresh === false){
+    return response.send({"status":"stale","message":"Did not tweet. Data is not fresh"})
+  }
+
+  let tweetMessage = await getTodaysMessage("twitter")
+
+  return postTweet(tweetMessage)
+  .then(data=>response.send(data))
+  .catch(error=>response.send(error))
+});
+
+
+
+exports.scheduledTweet = functions.pubsub.schedule('30 10 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+
+    url = `${PRODUCTION_URL}/tweetDailyInfo`
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success executing today's tweet\n"+data)
+          return data
+        })
+      .catch(error=>{
+        console.log("Error sending today's Tweet\n"+error)
+        return error
+      })
+
+});
+
 // exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
 //   let documentRef = admin.firestore().doc('data/historicalData');
 //   documentRef.get()
