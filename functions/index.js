@@ -114,9 +114,13 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
     labeledData["saludTimeSignature"] = saludTimeSignature
     labeledData["timestamp"] = timestamp
     labeledData.totalPositive = labeledData.molecularPositive+labeledData.serologicalPositive
+    if (isSaludSignatureFresh(saludTimeSignature)){
+      let ref = admin.firestore().doc("data/todaysData")
+      return ref.set(labeledData)
+    } else{
+      throw new Error("Did not scrape: Health Department data is stale.")
+    }
 
-    let ref = admin.firestore().doc("data/todaysData")
-    return ref.set(labeledData)
   })
   .then(data=>response.send(data))
   .catch(error=>{
@@ -326,6 +330,24 @@ exports.secondScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *'
 
 });
 
+const isSaludSignatureFresh = (saludTimeSignature) =>{
+  let currentESTTime = getCurrentESTTime()
+
+  let trimmedSaludSignature = saludTimeSignature.trim()
+
+  // get date of trimmedSaludSignature
+  const locationOfAl = trimmedSaludSignature.indexOf("al ")
+  const dateNumberStart = locationOfAl + 3
+  const dateNumberEnd = trimmedSaludSignature[dateNumberStart+1] === " " ? dateNumberStart+1 : dateNumberStart+2
+
+  const saludDayOfMonth = parseInt(trimmedSaludSignature.substring(dateNumberStart,dateNumberEnd))
+  const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
+  console.log("Today's day of month is ",saludDayOfMonth)
+  console.log("Data's day of month for today is",saludDayOfMonth)
+
+  return saludDayOfMonth === todaysDayOfMonth
+}
+
 
 const isTodaysDataFresh = async () => {
   let ref = admin.firestore().doc("data/todaysData")
@@ -340,23 +362,8 @@ const isTodaysDataFresh = async () => {
     }
   })
 
-  let currentESTTime = getCurrentESTTime()
 
-  let saludTimeSignature = todaysData.saludTimeSignature.trim()
-
-  // get date of saludTimeSignature
-  const locationOfAl = saludTimeSignature.indexOf("al ")
-  const dateNumberStart = locationOfAl + 3
-  const dateNumberEnd = saludTimeSignature[dateNumberStart+1] === " " ? dateNumberStart+1 : dateNumberStart+2
-
-  const saludDayOfMonth = parseInt(saludTimeSignature.substring(dateNumberStart,dateNumberEnd))
-  const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
-  console.log("Today's day of month is ",saludDayOfMonth)
-  console.log("Data's day of month for today is",saludDayOfMonth)
-
-  const dataIsTodayFresh = saludDayOfMonth === todaysDayOfMonth
-  console.log("Dates match?: ",dataIsTodayFresh)
-
+  let dataIsTodayFresh = isSaludSignatureFresh(todaysData.saludTimeSignature)
   return dataIsTodayFresh
 
 }
@@ -504,7 +511,9 @@ const sendSMS = async (number,message) => {
 
 
 exports.sendAllSMS = functions.https.onRequest(async(request, response) => {
-  let message = await getTodaysMessage()
+  let dataNotStale = await isTodaysDataFresh()
+
+  let message = dataNotStale ?  await getTodaysMessage() : "El Departamento de Salud no ha publicado la data de Covid para hoy."
   console.log("MESSAGES IS\n",message)
   console.log("END MESSAGE")
   let NUMBERS = keys.twilio.test_numbers
