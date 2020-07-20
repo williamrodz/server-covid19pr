@@ -132,7 +132,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
 
 PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net"
 
-exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
+exports.eightAMscheduleScrape = functions.pubsub.schedule('00 8 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
   url = `${PRODUCTION_URL}/scrapeTodaysData`
@@ -148,8 +148,7 @@ exports.scheduledScrapeTodaysData = functions.pubsub.schedule('30 9 * * *')
 
 });
 
-// Second scrape in case data was updated later by PR health dept
-exports.secondScheduledScrapeTodaysData = functions.pubsub.schedule('30 12 * * *')
+exports.nineAMScheduledScrape = functions.pubsub.schedule('00 9 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
   url = `${PRODUCTION_URL}/scrapeTodaysData`
@@ -164,6 +163,23 @@ exports.secondScheduledScrapeTodaysData = functions.pubsub.schedule('30 12 * * *
   })
 
 });
+
+exports.noonScheduledScrape = functions.pubsub.schedule('30 12 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+  url = `${PRODUCTION_URL}/scrapeTodaysData`
+  fetch(url,{method:'GET'})
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping today's number: "+error)
+    return error
+  })
+
+});
+
 
 //
 // exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
@@ -296,7 +312,7 @@ exports.logTodaysDataToHistory = functions.https.onRequest((request, response) =
 
 
 
-exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
+exports.scheduledHistoryAddToday = functions.pubsub.schedule('10 8 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
     var url = `${PRODUCTION_URL}/logTodaysDataToHistory`
@@ -313,7 +329,24 @@ exports.scheduledHistoryAddToday = functions.pubsub.schedule('0 10 * * *')
 });
 
 
-exports.secondScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *')
+exports.secondScheduledHistoryAddToday = functions.pubsub.schedule('40 9 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+
+    var url = `${PRODUCTION_URL}/logTodaysDataToHistory`
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success adding today's data to history: "+Object.keys(data))
+          return data
+        })
+      .catch(error=>{
+        console.log("Error adding today's data to history: "+error)
+        return error
+      })
+
+});
+
+exports.thirdScheduledHistoryAddToday = functions.pubsub.schedule('12 40 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
 
@@ -369,6 +402,17 @@ const isTodaysDataFresh = async () => {
 }
 
 
+exports.checkDataFresh = functions.https.onRequest( async (request, response) => {
+  let dataFresh = await isTodaysDataFresh()
+  return response.send({"dataFresh":dataFresh})
+});
+
+
+exports.obtainTodaysMessage = functions.https.onRequest( async (request, response) => {
+  let todaysMessage = await getTodaysMessage()
+  return response.send({"message":todaysMessage})
+});
+
 const getTodaysMessage = async (messageType) =>{
 
   let ref = admin.firestore().doc("data/todaysData")
@@ -382,8 +426,6 @@ const getTodaysMessage = async (messageType) =>{
       return {noDataAvailable:true}
     }
   })
-
-
 
   const historicalDataRef = admin.firestore().doc('data/historicalData');
 
@@ -423,9 +465,9 @@ const getTodaysMessage = async (messageType) =>{
 
     let historical = data[1]
     var message = `COVIDTrackerPR.com\n${justSaludDate}\n\n`
-    message += `Total de cosas positivos: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
-    // message += `-->Positivos pruebas moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
-    // message += `-->Positivos pruebas serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
+    message += `Total de casos positivos: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
+    message += `->Pruebas moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
+    message += `->Pruebas serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
 
     message += `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n\n`
 
@@ -433,7 +475,7 @@ const getTodaysMessage = async (messageType) =>{
       message += "#COVIDー19 #PuertoRico #coronavirus\n"
     }
     message += "- - - - - - \n"
-    message += "Datos obtenidos del Departamento de Salud"
+    message += "Data del Departamento de Salud"
     //message += `Data for today ${currentESTTime.substring(0,currentESTTime.indexOf(','))}`
     // ^ date in m/d/y
     // message += dataIsTodayFresh ? "Data is fresh :)" : "Data is NOT fresh :("
@@ -623,7 +665,44 @@ exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
 
 
 
-exports.scheduledTweet = functions.pubsub.schedule('30 10 * * *')
+
+
+
+exports.scheduledTweet = functions.pubsub.schedule('30 9 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+
+    url = `${PRODUCTION_URL}/tweetDailyInfo`
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success executing today's tweet\n"+data)
+          return data
+        })
+      .catch(error=>{
+        console.log("Error sending today's Tweet\n"+error)
+        return error
+      })
+
+});
+
+exports.secondScheduledTweet = functions.pubsub.schedule('30 10 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+
+    url = `${PRODUCTION_URL}/tweetDailyInfo`
+    fetch(url,{method:'GET'})
+      .then(data=>{
+          console.log("Success executing today's tweet\n"+data)
+          return data
+        })
+      .catch(error=>{
+        console.log("Error sending today's Tweet\n"+error)
+        return error
+      })
+
+});
+
+exports.thirdScheduledTweet = functions.pubsub.schedule('40 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
 
