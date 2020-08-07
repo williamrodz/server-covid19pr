@@ -74,7 +74,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
   var x = Xray()
 
   scrapingSaludTimeSignature = new Promise((resolve,reject)=>{
-    x(PR_HEALTH_DEPT_COVID_URL, '.ms-rteElement-H3B')((error,items)=>{
+    x(PR_HEALTH_DEPT_COVID_URL, '.ms-rteFontSize-2')((error,items)=>{
       if (error){
         reject(error)
       } else{
@@ -90,7 +90,9 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
       if (error){
         reject(error)
       } else{
-        resolve({items:items,saludTimeSignature:saludTimeSignature})
+        // remove everything after comma 
+        let commaIndex = saludTimeSignature.indexOf(",")
+        resolve({items:items,saludTimeSignature:saludTimeSignature.substring(0,commaIndex)})
       }
     })
   })
@@ -466,16 +468,16 @@ const getTodaysMessage = async (messageType) =>{
     let historical = data[1]
     var message = `COVIDTrackerPR.com\n${justSaludDate}\n\n`
     message += `Total de casos positivos: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
-    message += `->Pruebas moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
-    message += `->Pruebas serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
+    message += `moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
+    message += `serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
 
     message += `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n\n`
 
     if (messageType === "twitter"){
       message += "#COVIDー19 #PuertoRico #coronavirus\n"
     }
-    message += "- - - - - - \n"
-    message += "Data del Departamento de Salud"
+    // message += "- - - - - - \n"
+    // message += "Data del Departamento de Salud"
     //message += `Data for today ${currentESTTime.substring(0,currentESTTime.indexOf(','))}`
     // ^ date in m/d/y
     // message += dataIsTodayFresh ? "Data is fresh :)" : "Data is NOT fresh :("
