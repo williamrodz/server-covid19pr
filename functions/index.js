@@ -377,8 +377,8 @@ const isSaludSignatureFresh = (saludTimeSignature) =>{
 
   const saludDayOfMonth = parseInt(trimmedSaludSignature.substring(dateNumberStart,dateNumberEnd))
   const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
-  console.log("Today's day of month is ",saludDayOfMonth)
-  console.log("Data's day of month for today is",saludDayOfMonth)
+  // console.log("Today's day of month is ",saludDayOfMonth)
+  // console.log("Data's day of month for today is",saludDayOfMonth)
 
   return saludDayOfMonth === todaysDayOfMonth
 }
@@ -724,67 +724,118 @@ exports.thirdScheduledTweet = functions.pubsub.schedule('0 12 * * *')
 
 // Public-facing API 
 
-
+let API_CALL_LIMIT = 1000
 exports.getData = functions.https.onRequest(async(request, response) => {
 
-  let apiKey = request.query.key
+  let userAPIkey = request.query.key
+  let userInfoRef = admin.firestore().doc(`users/${userAPIkey}`)
 
-  var authorizedKeys = {'123':true}
+  let userInfoSnapshot = await userInfoRef.get();
+  const increment =  admin.firestore.FieldValue.increment(1);
 
-  let isAuthorized = authorizedKeys[apiKey] === true
+
+  
+  var isAuthorized = false
+  var statusMessage = "" 
+
+  if (userInfoSnapshot.exists){
+    console.log(`User ${userAPIkey} is making an API call`)
+    let userInfoData =  userInfoSnapshot.data()
+    // Check how many calls have been made
+    if (userInfoData.numberOfCalls){
+      if (userInfoData.numberOfCalls < API_CALL_LIMIT){
+        isAuthorized = true
+        userNumberOfCalls = userInfoData.numberOfCalls
+      }
+      else {
+        statusMessage = "NUMBER_OF_CALLS_EXCEEDED"
+      }
+    }
+    // User exists with no record of API calls
+    else{
+      isAuthorized = true
+    }
+
+  // User/key does not exist   
+  } else{
+    statusMessage = 'NOT_AUTHORIZED'
+  }
+
 
   if (isAuthorized === false){
-    return response.send({'status':'NOT_AUTHORIZED'})
+    return response.send({'status':'ERROR','message':statusMessage})
   }
 
-  let dataFresh = await isTodaysDataFresh()
-  let ref = admin.firestore().doc("data/historicalData")
+  let timeframe = request.query.timeframe
 
-  let allDataSnapshot = await ref.get()
+  if (timeframe === 'today'){
+    let dataFresh = await isTodaysDataFresh()
+    let todaysDataRef = admin.firestore().doc("data/todaysData")
+    let todaysDataSnapshot = await todaysDataRef.get()
+    let todaysData = todaysDataSnapshot.data()
 
-  let allData = allDataSnapshot.exists ? allDataSnapshot.data().all : {'status':'DATA_NOT_AVAILABLE'}
+    userInfoRef.update({numberOfCalls:increment})
 
-  // Clean by args
+    return response.send({'status':'OK','data':todaysData})
 
-  // Scenario 1: list of statistics, all valid
-  // Senario 2: list of stats, some invalid
-  // Scenario 3: one statistic, valid
-  // Scenario 4: one stat, not valid
-  // Scenario 5: nothing; all stats
+  }
 
-  let VALID_STATISTICS = {'totalPositive':true,'molecularPositive':true,'serologicalPositive':true,'deaths':true,timestamp:true,saludTimeSignature:true}
+  else if (timeframe === 'historical'){
+
+    let ref = admin.firestore().doc("data/historicalData")
+
+    let allDataSnapshot = await ref.get()
   
-  var desiredStatistics =  null
-  if (request.query.desiredStatistic === undefined){
-    // not supplied
-    desiredStatistics = Object.keys(VALID_STATISTICS)
-  }
-  else {
-    if (VALID_STATISTICS[request.query.desiredStatistic] !== true){
-      return response.send({'status':'ERROR','message':'Invalid desired statistics entered'})
-    } else{
-      desiredStatistics = [request.query.desiredStatistic]
+    let allData = allDataSnapshot.exists ? allDataSnapshot.data().all : {'status':'DATA_NOT_AVAILABLE'}
+  
+    // Clean by args
+  
+    // Scenario 1: list of statistics, all valid
+    // Senario 2: list of stats, some invalid
+    // Scenario 3: one statistic, valid
+    // Scenario 4: one stat, not valid
+    // Scenario 5: nothing; all stats
+  
+    let VALID_STATISTICS = {'totalPositive':true,'molecularPositive':true,'serologicalPositive':true,'deaths':true,timestamp:true,saludTimeSignature:true}
+    
+    var desiredStatistics =  null
+    if (request.query.desiredStatistic === undefined){
+      // not supplied
+      desiredStatistics = Object.keys(VALID_STATISTICS)
     }
+    else {
+      if (VALID_STATISTICS[request.query.desiredStatistic] !== true){
+        return response.send({'status':'ERROR','message':'Invalid desired statistics entered'})
+      } else{
+        desiredStatistics = [request.query.desiredStatistic]
+      }
+    }
+      
+    // clean
+    var output = []
+    for (let index = 0; index < allData.length; index++) {
+      const dataForDay = allData[index];
+  
+      const entry = {timestamp:dataForDay.timestamp,saludTimeSignature:dataForDay.saludTimeSignature}
+      desiredStatistics.forEach(label => {
+        if (dataForDay[label] !== null){
+          entry[label] = dataForDay[label]
+        }
+      });
+      output.push(entry)
+    }
+  
+    let formattedOutput = {'data':output}
+    userInfoRef.update({numberOfCalls:increment})
+    return response.send(formattedOutput)    
+
+  }
+  else{ 
+    return response.send({'status':'ERROR',message:'INVALID_TIMEFRAME_PARAMETER'})
   }
   
 
 
-  // clean
-  var output = []
-  for (let index = 0; index < allData.length; index++) {
-    const dataForDay = allData[index];
-
-    const entry = {timestamp:dataForDay.timestamp,saludTimeSignature:dataForDay.saludTimeSignature}
-    desiredStatistics.forEach(label => {
-      if (dataForDay[label] !== null){
-        entry[label] = dataForDay[label]
-      }
-    });
-    output.push(entry)
-  }
-
-  let formattedOutput = {'data':output}
-  return response.send(formattedOutput)
 });
 
 
