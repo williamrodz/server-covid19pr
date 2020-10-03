@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "firebase-functions": "^3.11.0",
     "oauth": "^0.9.15",
     "twitter": "^1.7.1"
   }

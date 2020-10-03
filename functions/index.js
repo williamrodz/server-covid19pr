@@ -83,7 +83,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
     })
   })
 
-  scrapingSaludTimeSignature
+  return scrapingSaludTimeSignature
   .then(saludTimeSignature=>{
     scrapingData = new Promise((resolve,reject)=>{
       x(PR_HEALTH_DEPT_COVID_URL, ['.ms-rteElement-H2B'])((error,items)=>{
@@ -348,7 +348,7 @@ exports.secondScheduledHistoryAddToday = functions.pubsub.schedule('40 9 * * *')
 
 });
 
-exports.thirdScheduledHistoryAddToday = functions.pubsub.schedule('12 40 * * *')
+exports.thirdScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
 
@@ -458,9 +458,9 @@ const getTodaysMessage = async (messageType) =>{
 
     let today = data[0]
     let saludTimeSignature = today.saludTimeSignature.trim()
-    let leadingText = "(Datos al "
+    let leadingText = "Datos al "
     let leadingTextIndex = saludTimeSignature.indexOf(leadingText)
-    let justSaludDate = saludTimeSignature.substring(leadingTextIndex+leadingText.length,saludTimeSignature.length - 1)
+    let justSaludDate = saludTimeSignature.substring(leadingTextIndex+leadingText.length,saludTimeSignature.length)
 
     const dataIsTodayFresh = data[2]
 
@@ -590,43 +590,43 @@ exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
 });
 
 
-exports.addPSID = functions.https.onRequest(async(request, response) => {
-  let documentRef = admin.firestore().doc('users/PSIDs');
-  let newPSID = request.query.PSID
-  return documentRef.update(
-    'all', admin.firestore.FieldValue.arrayUnion(newPSID)
-  ).then(data => {
-        return response.send({"status":"succes","notes":"Added new PSID succesfully"})
-      })
-});
+// exports.addPSID = functions.https.onRequest(async(request, response) => {
+//   let documentRef = admin.firestore().doc('users/PSIDs');
+//   let newPSID = request.query.PSID
+//   return documentRef.update(
+//     'all', admin.firestore.FieldValue.arrayUnion(newPSID)
+//   ).then(data => {
+//         return response.send({"status":"succes","notes":"Added new PSID succesfully"})
+//       })
+// });
 
-exports.removePSID = functions.https.onRequest(async(request, response) => {
-  let documentRef = admin.firestore().doc('users/PSIDs');
-  let existingPSID = request.query.PSID
-  return documentRef.update(
-    'all', admin.firestore.FieldValue.arrayRemove(existingPSID)
-  ).then(data => {
-        return response.send({"status":"success","notes":"Removed PSID successfully"})
-      })
-});
+// exports.removePSID = functions.https.onRequest(async(request, response) => {
+//   let documentRef = admin.firestore().doc('users/PSIDs');
+//   let existingPSID = request.query.PSID
+//   return documentRef.update(
+//     'all', admin.firestore.FieldValue.arrayRemove(existingPSID)
+//   ).then(data => {
+//         return response.send({"status":"success","notes":"Removed PSID successfully"})
+//       })
+// });
 
-exports.sendFBMessageToPSID = functions.https.onRequest(async(request, response) => {
-  let reply = await sendFB(request.query.PSID,request.query.message)
-  return response.send(reply)
-});
+// exports.sendFBMessageToPSID = functions.https.onRequest(async(request, response) => {
+//   let reply = await sendFB(request.query.PSID,request.query.message)
+//   return response.send(reply)
+// });
 
-exports.scheduledFBQA = functions.pubsub.schedule('30 10 * * *')
-  .timeZone('America/La_Paz')
-  .onRun( async (context)=>{
-    let message = await getTodaysMessage()
-    let PSIDs = keys.facebook.test_psids
-    for (var i = 0; i < PSIDs.length; i++) {
-      let destination = PSIDs[i]
-      sendFB(message,destination)
-    }
-    return response.send("Executed all FB messages")
+// exports.scheduledFBQA = functions.pubsub.schedule('30 10 * * *')
+//   .timeZone('America/La_Paz')
+//   .onRun( async (context)=>{
+//     let message = await getTodaysMessage()
+//     let PSIDs = keys.facebook.test_psids
+//     for (var i = 0; i < PSIDs.length; i++) {
+//       let destination = PSIDs[i]
+//       sendFB(message,destination)
+//     }
+//     return response.send("Executed all FB messages")
 
-  });
+//   });
 
 
 const postTweet = async (message)=>{
@@ -640,11 +640,11 @@ const postTweet = async (message)=>{
 
 
   return twitterClient.post('statuses/update', {status: message})
-    .then(function (tweet) {
+    .then( (tweet) => {
       console.log(tweet);
       return tweet
     })
-    .catch(function (error) {
+    .catch( (error) =>{
       console.log(error);
       return error
     })
@@ -704,7 +704,7 @@ exports.secondScheduledTweet = functions.pubsub.schedule('30 10 * * *')
 
 });
 
-exports.thirdScheduledTweet = functions.pubsub.schedule('40 12 * * *')
+exports.thirdScheduledTweet = functions.pubsub.schedule('0 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
 
@@ -720,6 +720,78 @@ exports.thirdScheduledTweet = functions.pubsub.schedule('40 12 * * *')
       })
 
 });
+
+
+// Public-facing API 
+
+
+exports.getData = functions.https.onRequest(async(request, response) => {
+
+  let apiKey = request.query.key
+
+  var authorizedKeys = {'123':true}
+
+  let isAuthorized = authorizedKeys[apiKey] === true
+
+  if (isAuthorized === false){
+    return response.send({'status':'NOT_AUTHORIZED'})
+  }
+
+  let dataFresh = await isTodaysDataFresh()
+  let ref = admin.firestore().doc("data/historicalData")
+
+  let allDataSnapshot = await ref.get()
+
+  let allData = allDataSnapshot.exists ? allDataSnapshot.data().all : {'status':'DATA_NOT_AVAILABLE'}
+
+  // Clean by args
+
+  // Scenario 1: list of statistics, all valid
+  // Senario 2: list of stats, some invalid
+  // Scenario 3: one statistic, valid
+  // Scenario 4: one stat, not valid
+  // Scenario 5: nothing; all stats
+
+  let VALID_STATISTICS = {'totalPositive':true,'molecularPositive':true,'serologicalPositive':true,'deaths':true,timestamp:true,saludTimeSignature:true}
+  
+  var desiredStatistics =  null
+  if (request.query.desiredStatistic === undefined){
+    // not supplied
+    desiredStatistics = Object.keys(VALID_STATISTICS)
+  }
+  else {
+    if (VALID_STATISTICS[request.query.desiredStatistic] !== true){
+      return response.send({'status':'ERROR','message':'Invalid desired statistics entered'})
+    } else{
+      desiredStatistics = [request.query.desiredStatistic]
+    }
+  }
+  
+
+
+  // clean
+  var output = []
+  for (let index = 0; index < allData.length; index++) {
+    const dataForDay = allData[index];
+
+    const entry = {timestamp:dataForDay.timestamp,saludTimeSignature:dataForDay.saludTimeSignature}
+    desiredStatistics.forEach(label => {
+      if (dataForDay[label] !== null){
+        entry[label] = dataForDay[label]
+      }
+    });
+    output.push(entry)
+  }
+
+  let formattedOutput = {'data':output}
+  return response.send(formattedOutput)
+});
+
+
+
+
+
+
 
 // exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
 //   let documentRef = admin.firestore().doc('data/historicalData');
