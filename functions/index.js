@@ -50,7 +50,7 @@ exports.serverTimeCheck = functions.https.onRequest((request, response) => {
 
 
 // Labels for columns as they appear on health dept site table
-DATA_LABELS = ["molecularPositive","serologicalPositive","deaths"]
+DATA_LABELS = ["molecularPositive","antigenPositive","serologicalPositive","deaths"]
 
 attachLabels = (data,labels) =>{
   output = {}
@@ -115,7 +115,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
     timestamp = getTimeStamp()
     labeledData["saludTimeSignature"] = saludTimeSignature
     labeledData["timestamp"] = timestamp
-    labeledData.totalPositive = labeledData.molecularPositive+labeledData.serologicalPositive
+    labeledData.totalPositive = labeledData.molecularPositive+labeledData.serologicalPositive+labeledData.antigenPositive
     if (isSaludSignatureFresh(saludTimeSignature)){
       let ref = admin.firestore().doc("data/todaysData")
       return ref.set(labeledData)
@@ -443,6 +443,8 @@ const getTodaysMessage = async (messageType) =>{
         newDeathsToday:historicalData[lengthOfData-1].deaths - historicalData[lengthOfData-2].deaths,
         newMolecularPositiveToday:historicalData[lengthOfData-1].molecularPositive - historicalData[lengthOfData-2].molecularPositive,
         newSerologicalPositiveToday:historicalData[lengthOfData-1].serologicalPositive - historicalData[lengthOfData-2].serologicalPositive,
+        newAntigenPositive:historicalData[lengthOfData-1].antigenPositive - historicalData[lengthOfData-2].antigenPositive,
+
         }
     }
     else{
@@ -470,7 +472,7 @@ const getTodaysMessage = async (messageType) =>{
     message += `Total de casos positivos: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
     message += `moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
     message += `serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
-
+    message += `antígeno: ${formatInteger(today.antigenPositive)} (+${formatInteger(historical.newAntigenPositive)} hoy)\n`
     message += `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n\n`
 
     if (messageType === "twitter"){
@@ -725,14 +727,13 @@ exports.thirdScheduledTweet = functions.pubsub.schedule('0 12 * * *')
 // Public-facing API 
 
 let API_CALL_LIMIT = 1000
-exports.getData = functions.https.onRequest(async(request, response) => {
+exports.getTodaysData = functions.https.onRequest(async(request, response) => {
 
   let userAPIkey = request.query.key
   let userInfoRef = admin.firestore().doc(`users/${userAPIkey}`)
 
   let userInfoSnapshot = await userInfoRef.get();
   const increment =  admin.firestore.FieldValue.increment(1);
-
 
   
   var isAuthorized = false
@@ -742,10 +743,10 @@ exports.getData = functions.https.onRequest(async(request, response) => {
     console.log(`User ${userAPIkey} is making an API call`)
     let userInfoData =  userInfoSnapshot.data()
     // Check how many calls have been made
-    if (userInfoData.numberOfCalls){
-      if (userInfoData.numberOfCalls < API_CALL_LIMIT){
+    if (userInfoData.numberOfGetTodaysDataCalls){
+      if (userInfoData.numberOfGetTodaysDataCalls < API_CALL_LIMIT){
         isAuthorized = true
-        userNumberOfCalls = userInfoData.numberOfCalls
+        numberOfGetTodaysDataCalls = userInfoData.numberOfGetTodaysDataCalls
       }
       else {
         statusMessage = "NUMBER_OF_CALLS_EXCEEDED"
@@ -766,21 +767,61 @@ exports.getData = functions.https.onRequest(async(request, response) => {
     return response.send({'status':'ERROR','message':statusMessage})
   }
 
-  let timeframe = request.query.timeframe
 
-  if (timeframe === 'today'){
-    let dataFresh = await isTodaysDataFresh()
-    let todaysDataRef = admin.firestore().doc("data/todaysData")
-    let todaysDataSnapshot = await todaysDataRef.get()
-    let todaysData = todaysDataSnapshot.data()
+  let dataFresh = await isTodaysDataFresh()
+  let todaysDataRef = admin.firestore().doc("data/todaysData")
+  let todaysDataSnapshot = await todaysDataRef.get()
+  let todaysData = todaysDataSnapshot.data()
 
-    userInfoRef.update({numberOfCalls:increment})
+  userInfoRef.update({numberOfGetTodaysDataCalls:increment})
 
-    return response.send({'status':'OK','data':todaysData})
+  return response.send({'status':'OK','data':todaysData})
 
+
+
+});
+
+exports.getHistoricalData = functions.https.onRequest(async(request, response) => {
+
+  let userAPIkey = request.query.key
+  let userInfoRef = admin.firestore().doc(`users/${userAPIkey}`)
+
+  let userInfoSnapshot = await userInfoRef.get();
+  const increment =  admin.firestore.FieldValue.increment(1);
+
+
+  
+  var isAuthorized = false
+  var statusMessage = "" 
+
+  if (userInfoSnapshot.exists){
+    console.log(`User ${userAPIkey} is making an API call`)
+    let userInfoData =  userInfoSnapshot.data()
+    // Check how many calls have been made
+    if (userInfoData.numberOfGetHistoricalDataCalls){
+      if (userInfoData.numberOfGetHistoricalDataCalls < API_CALL_LIMIT){
+        isAuthorized = true
+        usernumberOfGetHistoricalDataCalls = userInfoData.numberOfGetHistoricalDataCalls
+      }
+      else {
+        statusMessage = "NUMBER_OF_CALLS_EXCEEDED"
+      }
+    }
+    // User exists with no record of API calls
+    else{
+      isAuthorized = true
+    }
+
+  // User/key does not exist   
+  } else{
+    statusMessage = 'NOT_AUTHORIZED'
   }
 
-  else if (timeframe === 'historical'){
+
+  if (isAuthorized === false){
+    return response.send({'status':'ERROR','message':statusMessage})
+  }
+
 
     let ref = admin.firestore().doc("data/historicalData")
 
@@ -825,16 +866,9 @@ exports.getData = functions.https.onRequest(async(request, response) => {
       output.push(entry)
     }
   
-    let formattedOutput = {'data':output}
-    userInfoRef.update({numberOfCalls:increment})
+    let formattedOutput = {'status':'OK','data':output}
+    userInfoRef.update({numberOfGetHistoricalDataCalls:increment})
     return response.send(formattedOutput)    
-
-  }
-  else{ 
-    return response.send({'status':'ERROR',message:'INVALID_TIMEFRAME_PARAMETER'})
-  }
-  
-
 
 });
 

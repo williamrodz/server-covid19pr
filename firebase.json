@@ -3,21 +3,5 @@
     "predeploy": [
       "npm --prefix \"$RESOURCE_DIR\" run lint"
     ]
-  },
-  "hosting": {
-    "public": "../covid19-puertorico-web/build",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      },
-      {"source": "/getData",
-      "function": "getData"}
-    ]
   }
 }
