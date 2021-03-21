@@ -1,5 +1,7 @@
 const functions = require('firebase-functions');
 var admin = require("firebase-admin");
+const puppeteer = require('puppeteer');
+
 var keys = require("./privateKey.json")
 
 // Used to scrape webpages that have not been certified
@@ -20,7 +22,7 @@ var fetch = require("node-fetch");
 const util = require('util')
 
 
-const PR_HEALTH_DEPT_COVID_URL = "http://www.salud.gov.pr/Pages/coronavirus.aspx"
+const PR_HEALTH_DEPT_COVID_URL = "https://covid19datos.salud.gov.pr/"
 const NUMBERS = "0123456789"
 
 // Helper Functions
@@ -49,82 +51,125 @@ exports.serverTimeCheck = functions.https.onRequest((request, response) => {
 });
 
 
-// Labels for columns as they appear on health dept site table
-DATA_LABELS = ["molecularPositive","antigenPositive","serologicalPositive","deaths"]
-
-attachLabels = (data,labels) =>{
-  output = {}
-  for (var i = 0; i < labels.length; i++) {
-    output[labels[i]] = data[i]
-  }
-  return output
-}
-
 getTimeStamp = ()=>{
   return new Date().toLocaleString('en-US',{timeZone:'America/La_Paz'});
 }
 
-// Primary method for scraping daily method.
-exports.scrapeTodaysData = functions.https.onRequest(async (request, response) => {
-  let dataFresh = await isTodaysDataFresh()
-  if (dataFresh){
-    return response.send({"message":"Data is fresh,no scrape needed"})
+const sendScraper = async () => {
+  const url = PR_HEALTH_DEPT_COVID_URL;
+  const width =  1024;
+  const height = 768;
+
+  if (!url) {
+    console.log("No URL provided")
+    return response.send(`Invalid url: ${url}`);
   }
 
-  var x = Xray()
+  const browser = await puppeteer.launch({
+    args: ["--no-sandbox"]
+  });
+  const page = await browser.newPage();
 
-  scrapingSaludTimeSignature = new Promise((resolve,reject)=>{
-    x(PR_HEALTH_DEPT_COVID_URL, '.ms-rteFontSize-2')((error,items)=>{
-      if (error){
-        reject(error)
-      } else{
-        resolve(items)
-      }
-    })
-  })
+  await page.goto(url, { waitUntil: "networkidle2" });
 
-  return scrapingSaludTimeSignature
-  .then(saludTimeSignature=>{
-    scrapingData = new Promise((resolve,reject)=>{
-      x(PR_HEALTH_DEPT_COVID_URL, ['.ms-rteElement-H2B'])((error,items)=>{
-      if (error){
-        reject(error)
-      } else{
-        // remove everything after comma 
-        let commaIndex = saludTimeSignature.indexOf(",")
-        resolve({items:items,saludTimeSignature:saludTimeSignature.substring(0,commaIndex)})
-      }
-    })
-  })
-  return scrapingData
-})
-  .then(data=>{
-    items = data.items
-    console.log("items are",items)
-    saludTimeSignature = data.saludTimeSignature
-    console.log("saludTimeSignature is",saludTimeSignature)
-    integers = []
-    for (var i = 0; i < items.length; i++) {
-      string = items[i]
-      console.log(`Scraped item is ${string}`)
-      if (string.indexOf("COVID") === -1){// if firstChar starts with a number
-        integers.push(parseInt(cleanString(string)))
-      }
+  await page.setViewport({ width, height });
+
+  // get hotel details
+  var scrapedData = await page.evaluate(() => {
+    // get the hotel elements
+    let molecularPositive = document.querySelector('#totalConf');
+    let antigenPositive = document.querySelector('#totalProb');
+    let serologicalPositive = document.querySelector('#totalSosp');
+    let deaths = document.querySelector('#totalMuertes');
+    let saludTimeSignature = document.querySelector(".g-font-size-20.g-color-primary");
+
+    var outputHTML  = {};
+    try {
+      outputHTML.molecularPositive = ( molecularPositive.innerText);
+      outputHTML.antigenPositive = (antigenPositive.innerText);
+      outputHTML.serologicalPositive =  (serologicalPositive.innerText);
+      outputHTML.deaths = (deaths.innerText);
+      outputHTML.saludTimeSignature = saludTimeSignature.innerText;
     }
-    labeledData = attachLabels(integers,DATA_LABELS)
+    catch (exception){
+      console.log("exception");
+    }
+    console.log("outputHTML",outputHTML);
+    return outputHTML;
+  });
+
+  await browser.close();
+  // return response.type('application/json').send(JSON.stringify(scrapedData));
+  let attributes = Object.keys(scrapedData);
+
+  for(var i=0; i < attributes.length;i++){
+    let attribute = attributes[i];
+    let value = scrapedData[attribute];
+    console.log(`Value is ${attribute}:${value}`)
+    if (value.indexOf("de") === -1){
+      console.log("NUMBER!")
+      scrapedData[attribute] = getNumber(value);
+    }
+  } 
+
+  return (scrapedData);  
+}
+
+// .runWith({
+//   timeoutSeconds: 120,
+//   memory: "2GB"
+// })
+exports.scrapeDataAlpha = functions
+.runWith({
+  timeoutSeconds: 120,
+  memory: "2GB"
+})
+  .https.onRequest( async(request, response) => {
+
+    let scrapedData = sendScraper(); 
+    scrapedData.then(data=>response.send(data))
+    .catch(error=>response.send({error:error}));
+  });
+
+function getNumber(numberString){
+  var output = ""
+  for(var i=0; i <numberString.length; i++){
+    let char = numberString[i];
+    if (char !== ","){
+      output +=char;
+    }
+  }
+  return parseInt(output);
+}
+
+// Primary method for scraping daily method.
+exports.scrapeTodaysData = functions
+.runWith({
+  timeoutSeconds: 120,
+  memory: "2GB"
+})
+.
+https.onRequest(async (request, response) => {
+
+  return sendScraper()
+  .then(async(data)=>{
+
+    var dataForToday = data
+    console.log("Data for today is",Object.keys(data));
     timestamp = getTimeStamp()
-    labeledData["saludTimeSignature"] = saludTimeSignature
-    labeledData["timestamp"] = timestamp
-    labeledData.totalPositive = labeledData.molecularPositive+labeledData.serologicalPositive+labeledData.antigenPositive
-    if (isSaludSignatureFresh(saludTimeSignature)){
+    dataForToday["timestamp"] = timestamp
+
+
+    dataForToday.totalPositive = (dataForToday.molecularPositive)+(dataForToday.serologicalPositive)+(dataForToday.antigenPositive);
+    if (isSaludSignatureFresh(dataForToday["saludTimeSignature"])){
       let ref = admin.firestore().doc("data/todaysData")
-      return ref.set(labeledData)
+      await ref.set(dataForToday)
+      return response.send({"status":"success","newData":dataForToday})
     } else{
       throw new Error("Did not scrape: Health Department data is stale.")
     }
-
+    // return response.send(dataForToday)
   })
-  .then(data=>response.send(data))
   .catch(error=>{
     const errorMessage = "Error scraping/writing\n"+error + "Finish error"
     console.log(errorMessage)
@@ -132,6 +177,7 @@ exports.scrapeTodaysData = functions.https.onRequest(async (request, response) =
   })
 });
 
+TEST_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/"
 PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net"
 
 exports.eightAMscheduleScrape = functions.pubsub.schedule('00 8 * * *')
@@ -365,20 +411,18 @@ exports.thirdScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *')
 
 });
 
-const isSaludSignatureFresh = (saludTimeSignature) =>{
+const isSaludSignatureFresh = (dateString) =>{
   let currentESTTime = getCurrentESTTime()
 
-  let trimmedSaludSignature = saludTimeSignature.trim()
+  let trimmedSaludSignature = dateString.trim()
 
   // get date of trimmedSaludSignature
-  const locationOfAl = trimmedSaludSignature.indexOf("al ")
-  const dateNumberStart = locationOfAl + 3
+  const locationOfAl = trimmedSaludSignature.indexOf(", ")
+  const dateNumberStart = locationOfAl + 2
   const dateNumberEnd = trimmedSaludSignature[dateNumberStart+1] === " " ? dateNumberStart+1 : dateNumberStart+2
 
   const saludDayOfMonth = parseInt(trimmedSaludSignature.substring(dateNumberStart,dateNumberEnd))
   const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
-  // console.log("Today's day of month is ",saludDayOfMonth)
-  // console.log("Data's day of month for today is",saludDayOfMonth)
 
   return saludDayOfMonth === todaysDayOfMonth
 }
@@ -871,137 +915,3 @@ exports.getHistoricalData = functions.https.onRequest(async(request, response) =
     return response.send(formattedOutput)    
 
 });
-
-
-
-
-
-
-
-// exports.cleanHistoricalData = functions.https.onRequest((request, response) => {
-//   let documentRef = admin.firestore().doc('data/historicalData');
-//   documentRef.get()
-//   .then(snapshot=>{
-//
-//     if (snapshot.exists){
-//       var data = snapshot.data() // list of data per day
-//       let originalAll = data.all
-//       console.log("----OG DATA")
-//       originalAll.forEach((item, i) => {
-//         console.log(item)
-//       });
-//
-//       console.log("----OG DATA END --")
-//
-//     console.log("data is",originalAll.length, "long")
-//     var newAll = []
-//
-//     //clean each data entry
-//     for (var i = 0; i < originalAll.length; i++) {
-//       let originalEntry = originalAll[i]
-//       var newEntry = {...originalEntry}
-//
-//       var totalPositive = 0
-//
-//       if ('molecularTests' in originalEntry && 'serologicalTests' in originalEntry){
-//
-//         let molecularPositive = originalEntry.molecularTests
-//         let serologicalPositive = originalEntry.serologicalTests
-//
-//         totalPositive += molecularPositive
-//         totalPositive += serologicalPositive
-//
-//
-//         // Change
-//         delete newEntry.confirmedCases
-//         delete newEntry.molecularTests
-//         delete newEntry.serologicalTests
-//
-//         newEntry = {...newEntry,totalPositive:totalPositive,
-//                         molecularPositive:molecularPositive,
-//                         serologicalPositive:serologicalPositive}
-//       }
-//       else if ('probableCases' in originalEntry){
-//         let molecularPositive = originalEntry.confirmedCases
-//         let serologicalPositive = originalEntry.probableCases
-//
-//         totalPositive += molecularPositive
-//         totalPositive += serologicalPositive
-//
-//
-//         // Change
-//         delete newEntry.confirmedCases
-//         delete newEntry.probableCases
-//         newEntry = {...newEntry,totalPositive:totalPositive,
-//                         molecularPositive:molecularPositive,
-//                         serologicalPositive:serologicalPositive}
-//
-//
-//       }
-//       else {
-//         totalPositive = originalEntry.confirmedCases
-//         // Change
-//         delete newEntry.confirmedCases
-//         newEntry = {...newEntry,totalPositive:totalPositive}
-//       }
-//
-//       newAll.push(newEntry)
-//     }
-//
-//
-//
-//
-//     console.log("newAll is",newAll.length, "long")
-//
-//
-//     return documentRef.set({all:newAll})
-//     }
-//     else{
-//       return "Data not found"
-//     }
-//   })
-//   .then(result=>response.send(result))
-//   .catch(error=>response.send(error))
-// });
-
-//
-//
-// exports.loadSampleHistoricalData = functions.https.onRequest((request, response) => {
-//   beginnerData = [
-//     {month:4,
-//     day:6,
-//     year:2020,
-//     confirmedCases:513},
-//     {month:4,
-//     day:7,
-//     year:2020,
-//     confirmedCases:573},
-//     {month:4,
-//     day:8,
-//     year:2020,
-//     confirmedCases:620},
-//     {month:4,
-//     day:9,
-//     year:2020,
-//     confirmedCases:683},
-//     {month:4,
-//     day:10,
-//     year:2020,
-//     confirmedCases:725},
-//     {month:4,
-//     day:11,
-//     year:2020,
-//     confirmedCases:788},
-//     {month:4,
-//     day:12,
-//     year:2020,
-//     confirmedCases:897},
-//
-//   ]
-//
-//   let ref = admin.firestore().doc("data/historicalData")
-//   ref.set({last7Days:beginnerData})
-//   .then(data=>response.send(beginnerData))
-//   .catch(error=>response.send(error))
-//
-// });
