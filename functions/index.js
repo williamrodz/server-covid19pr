@@ -504,9 +504,9 @@ const getTodaysMessage = async (messageType) =>{
 
     let today = data[0]
     let saludTimeSignature = today.saludTimeSignature.trim()
-    let leadingText = "Datos al "
+    let leadingText = ","
     let leadingTextIndex = saludTimeSignature.indexOf(leadingText)
-    let justSaludDate = saludTimeSignature.substring(leadingTextIndex+leadingText.length,saludTimeSignature.length)
+    let justSaludDate = saludTimeSignature.substring(leadingTextIndex+2,saludTimeSignature.length)
 
     const dataIsTodayFresh = data[2]
 
@@ -674,6 +674,11 @@ exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
 
 //   });
 
+const logTweetDone = async () =>{
+  let ref = admin.firestore().doc("data/tweet")
+  const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
+  await ref.set(todaysDayOfMonth)
+}
 
 const postTweet = async (message)=>{
   var Twitter = require('twitter');
@@ -686,7 +691,8 @@ const postTweet = async (message)=>{
 
 
   return twitterClient.post('statuses/update', {status: message})
-    .then( (tweet) => {
+    .then( async (tweet) => {
+      await logTweetDone();
       console.log(tweet);
       return tweet
     })
@@ -706,9 +712,21 @@ exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
 
   let tweetMessage = await getTodaysMessage("twitter")
 
-  return postTweet(tweetMessage)
-  .then(data=>response.send(data))
-  .catch(error=>response.send(error))
+  // check if tweet was done
+  let tweetDateRef = admin.firestore().doc(`data/tweet`)
+  let tweetDataSnapshot = await tweetDateRef.get();  
+  let lastTweetDayOfMonth = tweetDataSnapshot.data().dayOfTweet;
+
+  const todaysDayOfMonth = (new Date(getCurrentESTTime())).getDate()
+
+  if (lastTweetDayOfMonth !== todaysDayOfMonth){
+    return postTweet(tweetMessage)
+    .then(data=>response.send({todaysDayOfMonth:todaysDayOfMonth,lastTweetDayOfMonth:lastTweetDayOfMonth}))
+    .catch(error=>response.send(error))
+  } else{
+    return response.send({"status":"OK","message":`already sent todaysDayOfMonth:${todaysDayOfMonth},lastTweetDayOfMonth:${lastTweetDayOfMonth} `})
+  }
+
 });
 
 
