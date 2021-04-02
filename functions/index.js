@@ -17,11 +17,10 @@ admin.initializeApp({
 });
 
 // Used for web scraping
-var Xray = require('x-ray')
 var fetch = require("node-fetch");
 const util = require('util')
 
-
+const NO_NEW_CASES_MESSAGE = "ZERO_MOLECULAR_CASES"
 const PR_HEALTH_DEPT_COVID_URL = "https://covid19datos.salud.gov.pr/"
 const NUMBERS = "0123456789"
 
@@ -47,7 +46,7 @@ const getCurrentESTTime = () =>{
 
 
 exports.serverTimeCheck = functions.https.onRequest((request, response) => {
- response.send(getCurrentESTTime());
+ return response.send(getCurrentESTTime());
 });
 
 
@@ -228,109 +227,6 @@ exports.noonScheduledScrape = functions.pubsub.schedule('30 12 * * *')
 
 });
 
-
-//
-// exports.scrapeMunicipiosData = functions.https.onRequest((request, response) => {
-//   console.log("Scraiping data for municipios")
-//   var x = Xray()
-//   datesURL = "https://github.com/Code4PuertoRico/covid19-pr-api/tree/master/data"
-//
-//   gettingDates = new Promise((resolve,reject)=>{
-//     x(datesURL, 'ol',['li'])((error,items)=>{
-//       if (error){
-//         reject(error)
-//       } else{
-//         resolve(items)
-//       }
-//     })
-//   })
-//
-//
-//   gettingDates
-//   .then(dates=>{
-//     lastDate = dates[dates.length - 1]
-//     console.log("Last date is "+lastDate)
-//
-//     splitUp = lastDate.split("-") // date is in form 04-11-2020
-//     month = parseInt(splitUp[0]) // has to be in single digit form for URL, others don't
-//     day = splitUp[1]
-//     year = splitUp[2]
-//
-//     const url = `https://raw.githubusercontent.com/Code4PuertoRico/covid19-pr-api/master/data/PuertoRicoTaskForce/${month}-${day}-${year}/CSV/municipios.csv`
-//     console.log(`GET ${url}`)
-//     return fetch(url,{method:'GET'})
-//   })
-//   .then(data=>{
-//     return data.buffer()
-//   })
-//   .then(buffer=>{
-//     var text = buffer.toString()
-//     // clean out quote chars
-//     text = text.replace(/"/g, '')
-//     var rows = text.split("\n")
-//     console.log("ROWS",rows)
-//     for (var i = 0; i < rows.length; i++) {
-//       rows[i] = rows[i].split(",")
-//     }
-//     var municipiosData = {}
-//     for (var j = 2; j < rows.length; j++) {
-//       const row = rows[j]
-//       console.log(`Row is ${row}`)
-//       const MUNICIPIO_NAME_i = 0
-//       const CONFIRMED_CASES_i = 1
-//
-//       var muncipioName = row[MUNICIPIO_NAME_i].slice(0,-1)
-//       // correct municipio names
-//       nameCorrections = {"Afasco":"Añasco","Bayamon":"Bayamón","Catano":"Cataño",
-//       "Guanica":"Guánica","Loiza":"Loíza","Manati":"Manatí","Mayaguez":"Mayagüez",
-//       "Rincon":"Rincón","Sabana Grande":"Sábana Grande","San German":"San Germán",
-//       "San Sebastian":"San Sebastián"}
-//       if (muncipioName in nameCorrections){
-//         muncipioName = nameCorrections[muncipioName]
-//       }
-//
-//
-//       const confirmedCases = parseInt(row[CONFIRMED_CASES_i])
-//       if (muncipioName.length > 0){
-//         municipiosData[muncipioName] = {confirmedCases:confirmedCases}
-//       }
-//     }
-//     return municipiosData
-//   })
-//   .then(municipiosData=>{
-//     municipiosData["timestamp"] = getTimeStamp()
-//
-//     let ref = admin.firestore().doc("data/municipios")
-//     return ref.set({all:municipiosData})
-//
-//   })
-//   .then(data=>response.send(data))
-//   .catch(error=>{
-//     return response.send(error)
-//   })
-//
-// });
-
-//
-// exports.scheduledMunicipioScrape = functions.pubsub.schedule('35 9 * * *')
-//   .timeZone('America/La_Paz')
-//   .onRun((context)=>{
-//     TESTING_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/scrapeMunicipiosData"
-//     PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net/scrapeMunicipiosData"
-//
-//     url = PRODUCTION_URL
-//     fetch(url,{method:'GET'})
-//       .then(data=>{
-//           console.log("Success adding today's data to history: "+Object.keys(data))
-//           return data
-//         })
-//       .catch(error=>{
-//         console.log("Error adding today's data to history: "+error)
-//         return error
-//       })
-//
-// });
-
 exports.logTodaysDataToHistory = functions.https.onRequest((request, response) => {
   let ref = admin.firestore().doc("data/todaysData")
   ref.get()
@@ -510,6 +406,12 @@ const getTodaysMessage = async (messageType) =>{
 
     const dataIsTodayFresh = data[2]
 
+    //No new cases, don't tweet
+    if (today.newMolecularPositiveToday === 0 || today.newMolecularPositiveToday === undefined){
+      console.log("no new cases!!")
+      return NO_NEW_CASES_MESSAGE
+    }
+
 
     let historical = data[1]
     var message = `COVIDTrackerPR.com\n${justSaludDate}\n\n`
@@ -522,13 +424,6 @@ const getTodaysMessage = async (messageType) =>{
     if (messageType === "twitter"){
       message += "#COVIDー19 #PuertoRico #coronavirus\n"
     }
-    // message += "- - - - - - \n"
-    // message += "Data del Departamento de Salud"
-    //message += `Data for today ${currentESTTime.substring(0,currentESTTime.indexOf(','))}`
-    // ^ date in m/d/y
-    // message += dataIsTodayFresh ? "Data is fresh :)" : "Data is NOT fresh :("
-
-
     return message
 
     })
@@ -636,47 +531,9 @@ exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
 });
 
 
-// exports.addPSID = functions.https.onRequest(async(request, response) => {
-//   let documentRef = admin.firestore().doc('users/PSIDs');
-//   let newPSID = request.query.PSID
-//   return documentRef.update(
-//     'all', admin.firestore.FieldValue.arrayUnion(newPSID)
-//   ).then(data => {
-//         return response.send({"status":"succes","notes":"Added new PSID succesfully"})
-//       })
-// });
-
-// exports.removePSID = functions.https.onRequest(async(request, response) => {
-//   let documentRef = admin.firestore().doc('users/PSIDs');
-//   let existingPSID = request.query.PSID
-//   return documentRef.update(
-//     'all', admin.firestore.FieldValue.arrayRemove(existingPSID)
-//   ).then(data => {
-//         return response.send({"status":"success","notes":"Removed PSID successfully"})
-//       })
-// });
-
-// exports.sendFBMessageToPSID = functions.https.onRequest(async(request, response) => {
-//   let reply = await sendFB(request.query.PSID,request.query.message)
-//   return response.send(reply)
-// });
-
-// exports.scheduledFBQA = functions.pubsub.schedule('30 10 * * *')
-//   .timeZone('America/La_Paz')
-//   .onRun( async (context)=>{
-//     let message = await getTodaysMessage()
-//     let PSIDs = keys.facebook.test_psids
-//     for (var i = 0; i < PSIDs.length; i++) {
-//       let destination = PSIDs[i]
-//       sendFB(message,destination)
-//     }
-//     return response.send("Executed all FB messages")
-
-//   });
-
 const logTweetDone = async () =>{
   let ref = admin.firestore().doc("data/tweet")
-  const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
+  const todaysDayOfMonth = (new Date(getCurrentESTTime())).getDate()
   await ref.set(todaysDayOfMonth)
 }
 
@@ -712,6 +569,10 @@ exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
 
   let tweetMessage = await getTodaysMessage("twitter")
 
+  if (tweetMessage === NO_NEW_CASES_MESSAGE){
+    return response.send({"status":"INVESTIGATE","message":"no new cases"});
+  }
+
   // check if tweet was done
   let tweetDateRef = admin.firestore().doc(`data/tweet`)
   let tweetDataSnapshot = await tweetDateRef.get();  
@@ -721,9 +582,9 @@ exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
 
   if (lastTweetDayOfMonth !== todaysDayOfMonth){
     return postTweet(tweetMessage)
-    .then(data=>response.send({todaysDayOfMonth:todaysDayOfMonth,lastTweetDayOfMonth:lastTweetDayOfMonth}))
+    .then(data=>response.send({"status":"OK","message":"Tweet posted"}))
     .catch(error=>response.send(error))
-  } else{
+}else{
     return response.send({"status":"OK","message":`already sent todaysDayOfMonth:${todaysDayOfMonth},lastTweetDayOfMonth:${lastTweetDayOfMonth} `})
   }
 
