@@ -35,6 +35,17 @@ cleanString = (text) =>{
   return output
 }
 
+const getNumber = (numberString) =>{
+  var output = ""
+  for(var i=0; i <numberString.length; i++){
+    let char = numberString[i];
+    if (char !== ","){
+      output +=char;
+    }
+  }
+  return parseInt(output);
+}
+
 const formatInteger = (number)=>{
   return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
@@ -130,16 +141,6 @@ exports.scrapeDataAlpha = functions
     .catch(error=>response.send({error:error}));
   });
 
-function getNumber(numberString){
-  var output = ""
-  for(var i=0; i <numberString.length; i++){
-    let char = numberString[i];
-    if (char !== ","){
-      output +=char;
-    }
-  }
-  return parseInt(output);
-}
 
 // Primary method for scraping daily method.
 exports.scrapeTodaysData = functions
@@ -150,14 +151,20 @@ exports.scrapeTodaysData = functions
 .
 https.onRequest(async (request, response) => {
 
+  if (await isTodaysDataFresh()){
+    return response.send({"status":"neutral","message":"data is fresh from scrape. no scrape needed"})
+  }
+
+
   return sendScraper()
   .then(async(data)=>{
 
     var dataForToday = data
     console.log("Data for today is",Object.keys(data));
     timestamp = getTimeStamp()
-    dataForToday["timestamp"] = timestamp
-
+    // Removing timestamp so log to data doesn't add repeated data
+    // dataForToday["timestamp"] = timestamp
+    
 
     dataForToday.totalPositive = (dataForToday.molecularPositive)+(dataForToday.serologicalPositive)+(dataForToday.antigenPositive);
     if (isSaludSignatureFresh(dataForToday["saludTimeSignature"])){
@@ -179,17 +186,19 @@ https.onRequest(async (request, response) => {
 TEST_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/"
 PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net"
 
+
 exports.eightAMscheduleScrape = functions.pubsub.schedule('00 8 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-  url = `${PRODUCTION_URL}/scrapeTodaysData`
-  fetch(url,{method:'GET'})
+  Promise.all([fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+  fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'})
+  ])
   .then(data=>{
-    console.log("Success scraping today's numbers: "+Object.keys(data))
+    console.log("Success scraping today's data at 8am "+Object.keys(data))
     return data
   })
   .catch(error=>{
-    console.log("Error scraping today's number: "+error)
+    console.log("Error scraping today's data at 8am: "+error)
     return error
   })
 
@@ -198,14 +207,14 @@ exports.eightAMscheduleScrape = functions.pubsub.schedule('00 8 * * *')
 exports.nineAMScheduledScrape = functions.pubsub.schedule('00 9 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-  url = `${PRODUCTION_URL}/scrapeTodaysData`
-  fetch(url,{method:'GET'})
+  Promise.all([fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+  fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'})])
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
     return data
   })
   .catch(error=>{
-    console.log("Error scraping today's number: "+error)
+    console.log("Error scraping todays data at 9am: "+error)
     return error
   })
 
@@ -349,10 +358,77 @@ exports.checkDataFresh = functions.https.onRequest( async (request, response) =>
   return response.send({"dataFresh":dataFresh})
 });
 
+let DO_NOT_TWEET = "DO_NOT_TWEET"
 
 exports.obtainTodaysMessage = functions.https.onRequest( async (request, response) => {
   let todaysMessage = await getTodaysMessage()
-  return response.send({"message":todaysMessage})
+  return response.send({"status":"OK","message":todaysMessage})
+});
+
+
+const obtainVaccineMessage = async() => {
+  const historicalDataRef = admin.firestore().doc('data/vaccineHistory');
+
+  let filledMessage =
+  historicalDataRef.get()
+  .then(snapshot=>{
+    if (snapshot.exists){
+      const historicalData = snapshot.data().all
+      const lengthOfData = historicalData.length
+      // return historicalData[lengthOfData - 2].peopleWithTwoDoses
+      return {
+        timeSignature:historicalData[lengthOfData-1].timeSignature,
+        administeredDoses:historicalData[lengthOfData-1].administeredDoses,
+        peopleWithAtLeastOneDose: historicalData[lengthOfData-1].peopleWithAtLeastOneDose,
+        peopleWithTwoDoses:historicalData[lengthOfData - 1].peopleWithTwoDoses,
+        newDosesToday:historicalData[lengthOfData-1].administeredDoses - historicalData[lengthOfData-2].administeredDoses,
+        newPeopleWithADose:historicalData[lengthOfData-1].peopleWithAtLeastOneDose - historicalData[lengthOfData-2].peopleWithAtLeastOneDose,
+        newPeopleWithTwoDoses:historicalData[lengthOfData - 1].peopleWithTwoDoses - historicalData[lengthOfData - 2].peopleWithTwoDoses
+        }
+    }
+  })
+  .then(recentData =>{
+
+    // do not tweet if no delta in vaccines, still not sure about vaccine data update frequency
+    if (recentData.newDosesToday === 0 && recentData.newPeopleWithADose === 0 && recentData.newPeopleWithTwoDoses === 0){
+      return DO_NOT_TWEET;  
+    }
+  
+    var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n`
+    message += `Vacunas administradas:${formatInteger(recentData.administeredDoses)} (+${recentData.newDosesToday} hoy)\n`
+    message += `Personas con 1 dosis: ${formatInteger(recentData.peopleWithAtLeastOneDose)} (+${recentData.newPeopleWithADose} hoy)\n`
+    message += `Personas con 2 dosis: ${formatInteger(recentData.peopleWithTwoDoses)}  (+${recentData.newPeopleWithTwoDoses} hoy)\n`
+    
+    message += "\n\n#COVIDー19 #PuertoRico #vacunas #vaccines"
+
+    return message;
+
+  })
+  .catch(error=>error);
+
+
+
+  return filledMessage;
+
+}
+
+exports.obtainVaccineMessage = functions.https.onRequest( async (request, response) => {
+  let vaccineTweet = await obtainVaccineMessage();
+  if (vaccineTweet === DO_NOT_TWEET){
+    return response.send({"status":DO_NOT_TWEET,"message":"zero change in vaccine data"})
+  }else {
+    return response.send({"status":"OK","message":vaccineTweet})
+  }
+});
+
+exports.tweetVaccineMessage = functions.https.onRequest( async (request, response) => {
+  let vaccineTweet = await obtainVaccineMessage();
+  
+  if (vaccineTweet === DO_NOT_TWEET){
+    return response.send({"status":DO_NOT_TWEET,"message":"zero change in vaccine data, will not tweet"})
+  }else {
+    return response.send(await postTweet(vaccineTweet))
+  }
 });
 
 const getTodaysMessage = async (messageType) =>{
@@ -369,6 +445,7 @@ const getTodaysMessage = async (messageType) =>{
     }
   })
 
+
   const historicalDataRef = admin.firestore().doc('data/historicalData');
 
   let historicalDataFromFireBase =
@@ -384,7 +461,6 @@ const getTodaysMessage = async (messageType) =>{
         newMolecularPositiveToday:historicalData[lengthOfData-1].molecularPositive - historicalData[lengthOfData-2].molecularPositive,
         newSerologicalPositiveToday:historicalData[lengthOfData-1].serologicalPositive - historicalData[lengthOfData-2].serologicalPositive,
         newAntigenPositive:historicalData[lengthOfData-1].antigenPositive - historicalData[lengthOfData-2].antigenPositive,
-
         }
     }
     else{
@@ -407,15 +483,15 @@ const getTodaysMessage = async (messageType) =>{
     const dataIsTodayFresh = data[2]
 
     //No new cases, don't tweet
-    if (today.newMolecularPositiveToday === 0 || today.newMolecularPositiveToday === undefined){
-      console.log("no new cases!!")
-      return NO_NEW_CASES_MESSAGE
-    }
+    // if (historical.newMolecularPositiveToday === 0){
+    //   console.log("no new cases!!")
+    //   return NO_NEW_CASES_MESSAGE
+    // }
 
 
     let historical = data[1]
     var message = `COVIDTrackerPR.com\n${justSaludDate}\n\n`
-    message += `Total de casos positivos: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
+    message += `Total de pruebas positivas: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
     message += `moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
     message += `serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
     message += `antígeno: ${formatInteger(today.antigenPositive)} (+${formatInteger(historical.newAntigenPositive)} hoy)\n`
@@ -429,6 +505,79 @@ const getTodaysMessage = async (messageType) =>{
     })
   .catch(error=>error)
 }
+
+const scrapeVaccineData = async () =>{
+
+  const browser = await puppeteer.launch({
+    args: ["--no-sandbox"]
+  });
+  const page = await browser.newPage()
+  await page.goto(PR_HEALTH_DEPT_COVID_URL,{ waitUntil: "networkidle2" })
+  await page.click('#dashboard_covid_nav > li:nth-child(2) > a');
+
+  var vaccineDataToday = await page.evaluate(()=>{
+    let administeredDoses = (document.querySelector('#dosisRegTotal').innerText);
+    let peopleWithAtLeastOneDose = (document.querySelector('#dosisRegDosis1').innerText);
+    let peopleWithTwoDoses = (document.querySelector('#dosisRegDosis2').innerText);
+    let timeSignature = (document.querySelector('#mainSection > div > div.d-flex.justify-content-between.align-items-end > div > div > div.g-font-size-20.g-color-primary').innerText);
+
+
+    return {administeredDoses:administeredDoses,peopleWithAtLeastOneDose:peopleWithAtLeastOneDose,peopleWithTwoDoses:peopleWithTwoDoses,timeSignature:timeSignature}
+  });
+
+  vaccineDataToday.administeredDoses = getNumber(vaccineDataToday.administeredDoses)
+  vaccineDataToday.peopleWithAtLeastOneDose = getNumber(vaccineDataToday.peopleWithAtLeastOneDose)
+  vaccineDataToday.peopleWithTwoDoses = getNumber(vaccineDataToday.peopleWithTwoDoses)
+
+  return (vaccineDataToday);  
+}
+
+exports.scrapeVaccineData = functions
+.runWith({
+  timeoutSeconds: 120,
+  memory: "2GB"
+})
+.https.onRequest(async(request, response) => {
+
+  // Check if scrape was already performed
+  const dataSnapshot = await admin.firestore().doc('data/vaccinesToday').get();
+  if (dataSnapshot.exists){
+    if (isSaludSignatureFresh(dataSnapshot.data().timeSignature)){
+      // data is fresh for today, no scrape needed
+      return response.send({"status":"OK","message":"Scrape was performed earlier today"})
+    }
+  }
+
+  // Otherwise, begin scrape process 
+  let vaccineDataForToday = await scrapeVaccineData();
+
+  // Update today's vaccination info
+  if (isSaludSignatureFresh(vaccineDataForToday.timeSignature)){
+    console.log("Vaccine data is fresh")
+
+    // Add to vaccinesToday index
+    let ref = admin.firestore().doc("data/vaccinesToday")
+    await ref.set(vaccineDataForToday)
+
+    // add to historical log
+    let vaccineHistoryLogRef = admin.firestore().doc('data/vaccineHistory');
+    vaccineHistoryLogRef.update(
+      'all', admin.firestore.FieldValue.arrayUnion(vaccineDataForToday)
+    )
+    .then(data => {
+      return response.send({"status":"OK",message:"Updated vaccination history succesfully",data:vaccineDataForToday})
+    })
+    .catch(error=>{
+      const errorMessage = "Error updating vaccine data\n"+error
+      response.send(errorMessage)
+  })
+
+
+
+  }
+
+  
+});
 
 
 
@@ -592,21 +741,18 @@ exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
 
 
 
-
-
-
 exports.scheduledTweet = functions.pubsub.schedule('30 9 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
 
-    url = `${PRODUCTION_URL}/tweetDailyInfo`
-    fetch(url,{method:'GET'})
+    Promise.all([fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+                  fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})])
       .then(data=>{
-          console.log("Success executing today's tweet\n"+data)
+          console.log("Success executing today's tweets\n"+data)
           return data
         })
       .catch(error=>{
-        console.log("Error sending today's Tweet\n"+error)
+        console.log("Error sending today's tweets\n"+error)
         return error
       })
 
