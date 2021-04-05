@@ -125,22 +125,6 @@ const sendScraper = async () => {
   return (scrapedData);  
 }
 
-// .runWith({
-//   timeoutSeconds: 120,
-//   memory: "2GB"
-// })
-exports.scrapeDataAlpha = functions
-.runWith({
-  timeoutSeconds: 120,
-  memory: "2GB"
-})
-  .https.onRequest( async(request, response) => {
-
-    let scrapedData = sendScraper(); 
-    scrapedData.then(data=>response.send(data))
-    .catch(error=>response.send({error:error}));
-  });
-
 
 // Primary method for scraping daily method.
 exports.scrapeTodaysData = functions
@@ -223,8 +207,8 @@ exports.nineAMScheduledScrape = functions.pubsub.schedule('00 9 * * *')
 exports.noonScheduledScrape = functions.pubsub.schedule('30 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
-  url = `${PRODUCTION_URL}/scrapeTodaysData`
-  fetch(url,{method:'GET'})
+    Promise.all([fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+    fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'})])
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
     return data
@@ -385,6 +369,8 @@ const obtainVaccineMessage = async() => {
         newPeopleWithADose:historicalData[lengthOfData-1].peopleWithAtLeastOneDose - historicalData[lengthOfData-2].peopleWithAtLeastOneDose,
         newPeopleWithTwoDoses:historicalData[lengthOfData - 1].peopleWithTwoDoses - historicalData[lengthOfData - 2].peopleWithTwoDoses
         }
+    } else {
+      return "SNAPSHOT_DOES_NOT_EXIST"
     }
   })
   .then(recentData =>{
@@ -394,10 +380,10 @@ const obtainVaccineMessage = async() => {
       return DO_NOT_TWEET;  
     }
   
-    var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n`
-    message += `Vacunas administradas:${formatInteger(recentData.administeredDoses)} (+${recentData.newDosesToday} hoy)\n`
-    message += `Personas con 1 dosis: ${formatInteger(recentData.peopleWithAtLeastOneDose)} (+${recentData.newPeopleWithADose} hoy)\n`
-    message += `Personas con 2 dosis: ${formatInteger(recentData.peopleWithTwoDoses)}  (+${recentData.newPeopleWithTwoDoses} hoy)\n`
+    var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n\n`
+    message += `Vacunas administradas:${formatInteger(recentData.administeredDoses)} (+${formatInteger(recentData.newDosesToday)} hoy)\n`
+    message += `Personas con 1 dosis: ${formatInteger(recentData.peopleWithAtLeastOneDose)} (+${formatInteger(recentData.newPeopleWithADose)} hoy)\n`
+    message += `Personas con 2 dosis: ${formatInteger(recentData.peopleWithTwoDoses)}  (+${formatInteger(recentData.newPeopleWithTwoDoses)} hoy)\n`
     
     message += "\n\n#COVIDー19 #PuertoRico #vacunas #vaccines"
 
@@ -762,8 +748,8 @@ exports.secondScheduledTweet = functions.pubsub.schedule('30 10 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
 
-    url = `${PRODUCTION_URL}/tweetDailyInfo`
-    fetch(url,{method:'GET'})
+    Promise.all([fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+                  fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})])
       .then(data=>{
           console.log("Success executing today's tweet\n"+data)
           return data
@@ -779,8 +765,8 @@ exports.thirdScheduledTweet = functions.pubsub.schedule('0 12 * * *')
   .timeZone('America/La_Paz')
   .onRun((context)=>{
 
-    url = `${PRODUCTION_URL}/tweetDailyInfo`
-    fetch(url,{method:'GET'})
+    Promise.all([fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+                  fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})])
       .then(data=>{
           console.log("Success executing today's tweet\n"+data)
           return data
