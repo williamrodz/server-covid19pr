@@ -349,6 +349,22 @@ exports.obtainTodaysMessage = functions.https.onRequest( async (request, respons
   return response.send({"status":"OK","message":todaysMessage})
 });
 
+exports.getProgressBar = functions.https.onRequest( async (request, response) => {
+  return response.send({"status":"OK","message":getProgressBar(request.query.progress)})
+});
+
+function getProgressBar(progress){
+  let filled_blocks = parseInt( progress / 10);
+  var empty_blocks = 10 - filled_blocks;
+  var bar = `${"█".repeat(filled_blocks)}`;
+  for (var i = 0; i < empty_blocks; i++){
+    if (filled_blocks + i === 7){
+      bar = `${bar}|`;
+    }
+    bar = `${bar}░`;
+  }
+  return bar
+}
 
 const obtainVaccineMessage = async() => {
   const historicalDataRef = admin.firestore().doc('data/vaccineHistory');
@@ -379,14 +395,19 @@ const obtainVaccineMessage = async() => {
     if (recentData.newDosesToday === 0 && recentData.newPeopleWithADose === 0 && recentData.newPeopleWithTwoDoses === 0){
       return DO_NOT_TWEET;  
     }
+    let POPULATION_OF_PR = 2799926
+    let percentageFullyVaccinated = ((recentData.peopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(1)
+    let newlyFullyVaccinatedPercentage = ((recentData.newPeopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(1)
+    let percentageOneDose = ((recentData.peopleWithAtLeastOneDose / POPULATION_OF_PR) * 100).toFixed(1) ;
+    let newlyWithOneDosePercentage = ((recentData.newPeopleWithADose / POPULATION_OF_PR) * 100).toFixed(1)
+
   
     var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n\n`
-    message += `Vacunas administradas:${formatInteger(recentData.administeredDoses)} (+${formatInteger(recentData.newDosesToday)} hoy)\n`
-    message += `Personas con 1 dosis: ${formatInteger(recentData.peopleWithAtLeastOneDose)} (+${formatInteger(recentData.newPeopleWithADose)} hoy)\n`
-    message += `Personas con 2 dosis: ${formatInteger(recentData.peopleWithTwoDoses)}  (+${formatInteger(recentData.newPeopleWithTwoDoses)} hoy)\n`
-    
+    message += `Vacunas administradas: ${formatInteger(recentData.administeredDoses)} (+${formatInteger(recentData.newDosesToday)})\n`
+    message += `Población con 1 dosis: ${formatInteger(percentageOneDose)}% (+${formatInteger(newlyWithOneDosePercentage)}%)\n`
+    message += `Población con 2 dosis: ${formatInteger(percentageFullyVaccinated)}% (+${formatInteger(newlyFullyVaccinatedPercentage)}%)\n`
+    message += `${getProgressBar(percentageFullyVaccinated)} ${percentageFullyVaccinated}%`
     message += "\n\n#COVIDー19 #PuertoRico #vacunas #vaccines"
-
     return message;
 
   })
