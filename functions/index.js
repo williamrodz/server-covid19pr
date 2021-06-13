@@ -366,6 +366,29 @@ function getProgressBar(progress){
   return bar
 }
 
+exports.isVaccineDataFresh = functions.https.onRequest( async (request, response) => {
+  return response.send(await(isVaccineDataFresh()));
+});
+
+
+const isVaccineDataFresh = async() =>{
+  const historicalDataRef = admin.firestore().doc('data/vaccineHistory');
+
+  let freshness =
+  historicalDataRef.get()
+  .then(snapshot=>{
+    if (snapshot.exists){
+      const historicalData = snapshot.data().all
+      const lengthOfData = historicalData.length
+      const timeSignature = historicalData[lengthOfData-1].timeSignature
+      return isSaludSignatureFresh(timeSignature);
+    }
+    return false; 
+  })
+  await freshness;
+  return freshness;
+}
+
 const obtainVaccineMessage = async() => {
   const historicalDataRef = admin.firestore().doc('data/vaccineHistory');
 
@@ -404,8 +427,8 @@ const obtainVaccineMessage = async() => {
   
     var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n\n`
     message += `Vacunas administradas: ${formatInteger(recentData.administeredDoses)} (+${formatInteger(recentData.newDosesToday)})\n`
-    message += `Población con 1 dosis: ${formatInteger(percentageOneDose)}% (+${formatInteger(newlyWithOneDosePercentage)}%)\n`
-    message += `Población con 2 dosis: ${formatInteger(percentageFullyVaccinated)}% (+${formatInteger(newlyFullyVaccinatedPercentage)}%)\n`
+    message += `Población con 1 de 2 dosis: ${formatInteger(percentageOneDose)}% (+${formatInteger(newlyWithOneDosePercentage)}%)\n`
+    message += `Población con serie de dosis completada: ${formatInteger(percentageFullyVaccinated)}% (+${formatInteger(newlyFullyVaccinatedPercentage)}%)\n`
     message += `${getProgressBar(percentageFullyVaccinated)} ${percentageFullyVaccinated}%`
     message += "\n\n#COVIDー19 #PuertoRico #vacunas #vaccines"
     return message;
@@ -431,9 +454,15 @@ exports.obtainVaccineMessage = functions.https.onRequest( async (request, respon
 exports.tweetVaccineMessage = functions.https.onRequest( async (request, response) => {
   let vaccineTweet = await obtainVaccineMessage();
   
+  let vaccineDataFresh = await isVaccineDataFresh();
+  
   if (vaccineTweet === DO_NOT_TWEET){
     return response.send({"status":DO_NOT_TWEET,"message":"zero change in vaccine data, will not tweet"})
-  }else {
+  }
+  else if (!vaccineDataFresh){
+    return response.send({"status":DO_NOT_TWEET,"message":"Vaccine data is stale"})
+  }  
+  else {
     return response.send(await postTweet(vaccineTweet))
   }
 });
@@ -451,8 +480,6 @@ const getTodaysMessage = async (messageType) =>{
       return {noDataAvailable:true}
     }
   })
-
-
   const historicalDataRef = admin.firestore().doc('data/historicalData');
 
   let historicalDataFromFireBase =
@@ -474,7 +501,6 @@ const getTodaysMessage = async (messageType) =>{
       return {dataAvailable:false}
     }
   })
-
 
   return Promise.all([todaysData,historicalDataFromFireBase,isTodaysDataFresh()])
   .then(data=>{
