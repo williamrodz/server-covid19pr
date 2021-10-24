@@ -84,20 +84,16 @@ const sendScraper = async () => {
 
   await page.setViewport({ width, height });
 
-  // get hotel details
   var scrapedData = await page.evaluate(() => {
-    // get the hotel elements
-    let molecularPositive = document.querySelector('#totalConf');
-    let antigenPositive = document.querySelector('#totalProb');
-    let serologicalPositive = document.querySelector('#totalSosp');
-    let deaths = document.querySelector('#totalMuertes');
-    let saludTimeSignature = document.querySelector(".g-font-size-20.g-color-primary");
+    let molecularPositive = document.querySelector('#resumenTotalCasosConf');
+    let antigenPositive = document.querySelector('#resumenTotalCasosProb');
+    let deaths = document.querySelector('#resumenTotalMuertes');
+    let saludTimeSignature = document.querySelector(".g-font-size-16.g-color-primary");
 
     var outputHTML  = {};
     try {
       outputHTML.molecularPositive = ( molecularPositive.innerText);
       outputHTML.antigenPositive = (antigenPositive.innerText);
-      outputHTML.serologicalPositive =  (serologicalPositive.innerText);
       outputHTML.deaths = (deaths.innerText);
       outputHTML.saludTimeSignature = saludTimeSignature.innerText;
     }
@@ -115,10 +111,10 @@ const sendScraper = async () => {
   for(var i=0; i < attributes.length;i++){
     let attribute = attributes[i];
     let value = scrapedData[attribute];
-    console.log(`Value is ${attribute}:${value}`)
-    if (value.indexOf("de") === -1){
-      console.log("NUMBER!")
+    console.log(`Value is ${attribute}: ${value}`)
+    if (value.indexOf("/") === -1){
       scrapedData[attribute] = getNumber(value);
+      console.log("converting to number...")
     }
   } 
 
@@ -150,7 +146,7 @@ https.onRequest(async (request, response) => {
     // dataForToday["timestamp"] = timestamp
     
 
-    dataForToday.totalPositive = (dataForToday.molecularPositive)+(dataForToday.serologicalPositive)+(dataForToday.antigenPositive);
+    dataForToday.totalPositive = (dataForToday.molecularPositive)+(dataForToday.antigenPositive);
     if (isSaludSignatureFresh(dataForToday["saludTimeSignature"])){
       let ref = admin.firestore().doc("data/todaysData")
       await ref.set(dataForToday)
@@ -303,14 +299,11 @@ exports.thirdScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *')
 const isSaludSignatureFresh = (dateString) =>{
   let currentESTTime = getCurrentESTTime()
 
-  let trimmedSaludSignature = dateString.trim()
+  let MMSDDSYYYY = dateString.split(" ")[2]
+  let listOfMMSDDSYYYY = MMSDDSYYYY.split("/")
 
-  // get date of trimmedSaludSignature
-  const locationOfAl = trimmedSaludSignature.indexOf(", ")
-  const dateNumberStart = locationOfAl + 2
-  const dateNumberEnd = trimmedSaludSignature[dateNumberStart+1] === " " ? dateNumberStart+1 : dateNumberStart+2
 
-  const saludDayOfMonth = parseInt(trimmedSaludSignature.substring(dateNumberStart,dateNumberEnd))
+  const saludDayOfMonth = parseInt(listOfMMSDDSYYYY[1])
   const todaysDayOfMonth = (new Date(currentESTTime)).getDate()
 
   return saludDayOfMonth === todaysDayOfMonth
@@ -401,10 +394,8 @@ const obtainVaccineMessage = async() => {
       // return historicalData[lengthOfData - 2].peopleWithTwoDoses
       return {
         timeSignature:historicalData[lengthOfData-1].timeSignature,
-        administeredDoses:historicalData[lengthOfData-1].administeredDoses,
         peopleWithAtLeastOneDose: historicalData[lengthOfData-1].peopleWithAtLeastOneDose,
         peopleWithTwoDoses:historicalData[lengthOfData - 1].peopleWithTwoDoses,
-        newDosesToday:historicalData[lengthOfData-1].administeredDoses - historicalData[lengthOfData-2].administeredDoses,
         newPeopleWithADose:historicalData[lengthOfData-1].peopleWithAtLeastOneDose - historicalData[lengthOfData-2].peopleWithAtLeastOneDose,
         newPeopleWithTwoDoses:historicalData[lengthOfData - 1].peopleWithTwoDoses - historicalData[lengthOfData - 2].peopleWithTwoDoses
         }
@@ -426,7 +417,6 @@ const obtainVaccineMessage = async() => {
 
   
     var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n\n`
-    message += `Vacunas administradas: ${formatInteger(recentData.administeredDoses)} (+${formatInteger(recentData.newDosesToday)})\n`
     message += `Población con 1 de 2 dosis: ${formatInteger(percentageOneDose)}% (+${formatInteger(newlyWithOneDosePercentage)}%)\n`
     message += `Población con serie de dosis completada: ${formatInteger(percentageFullyVaccinated)}% (+${formatInteger(newlyFullyVaccinatedPercentage)}%)\n`
     message += `${getProgressBar(percentageFullyVaccinated)} ${percentageFullyVaccinated}%`
@@ -493,7 +483,6 @@ const getTodaysMessage = async (messageType) =>{
         newPositivesToday:historicalData[lengthOfData-1].totalPositive - historicalData[lengthOfData-2].totalPositive,
         newDeathsToday:historicalData[lengthOfData-1].deaths - historicalData[lengthOfData-2].deaths,
         newMolecularPositiveToday:historicalData[lengthOfData-1].molecularPositive - historicalData[lengthOfData-2].molecularPositive,
-        newSerologicalPositiveToday:historicalData[lengthOfData-1].serologicalPositive - historicalData[lengthOfData-2].serologicalPositive,
         newAntigenPositive:historicalData[lengthOfData-1].antigenPositive - historicalData[lengthOfData-2].antigenPositive,
         }
     }
@@ -519,14 +508,13 @@ const getTodaysMessage = async (messageType) =>{
     // if (historical.newMolecularPositiveToday === 0){
     //   console.log("no new cases!!")
     //   return NO_NEW_CASES_MESSAGE
-    // }
+    // } 
 
 
     let historical = data[1]
     var message = `COVIDTrackerPR.com\n${justSaludDate}\n\n`
     message += `Total de pruebas positivas: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
     message += `moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
-    message += `serológicas: ${formatInteger(today.serologicalPositive)} (+${formatInteger(historical.newSerologicalPositiveToday)} hoy)\n`
     message += `antígeno: ${formatInteger(today.antigenPositive)} (+${formatInteger(historical.newAntigenPositive)} hoy)\n`
     message += `Muertes: ${formatInteger(today.deaths)} (+${formatInteger(historical.newDeathsToday)} hoy)\n\n`
 
@@ -545,20 +533,22 @@ const scrapeVaccineData = async () =>{
     args: ["--no-sandbox"]
   });
   const page = await browser.newPage()
+  console.log("Opening page..")
   await page.goto(PR_HEALTH_DEPT_COVID_URL,{ waitUntil: "networkidle2" })
+  console.log("Clicking on selector..")
   await page.click('#dashboard_covid_nav > li:nth-child(2) > a');
+  console.log("Looking for data..")
 
   var vaccineDataToday = await page.evaluate(()=>{
-    let administeredDoses = (document.querySelector('#dosisRegTotal').innerText);
-    let peopleWithAtLeastOneDose = (document.querySelector('#dosisRegDosis1').innerText);
-    let peopleWithTwoDoses = (document.querySelector('#dosisRegDosis2').innerText);
-    let timeSignature = (document.querySelector('#mainSection > div > div.d-flex.justify-content-between.align-items-end > div > div > div.g-font-size-20.g-color-primary').innerText);
+    let peopleWithAtLeastOneDose = (document.querySelector('#vacunasTotalDosis1').innerText);
+    let peopleWithTwoDoses = (document.querySelector('#vacunasTotalDosis2').innerText);
+    let timeSignature = (document.querySelector('#dashboard_covid--vacunacion > div.u-heading-v2-3--bottom.g-brd-primary.ml-3.g-my-10 > div.g-font-size-16.g-color-primary').innerText);
 
 
-    return {administeredDoses:administeredDoses,peopleWithAtLeastOneDose:peopleWithAtLeastOneDose,peopleWithTwoDoses:peopleWithTwoDoses,timeSignature:timeSignature}
+    return {peopleWithAtLeastOneDose:peopleWithAtLeastOneDose,peopleWithTwoDoses:peopleWithTwoDoses,timeSignature:timeSignature}
   });
 
-  vaccineDataToday.administeredDoses = getNumber(vaccineDataToday.administeredDoses)
+  console.log("Got data!..")
   vaccineDataToday.peopleWithAtLeastOneDose = getNumber(vaccineDataToday.peopleWithAtLeastOneDose)
   vaccineDataToday.peopleWithTwoDoses = getNumber(vaccineDataToday.peopleWithTwoDoses)
 
@@ -583,7 +573,7 @@ exports.scrapeVaccineData = functions
 
   // Otherwise, begin scrape process 
   let vaccineDataForToday = await scrapeVaccineData();
-
+  console.log("Now checking data..")
   // Update today's vaccination info
   if (isSaludSignatureFresh(vaccineDataForToday.timeSignature)){
     console.log("Vaccine data is fresh")
@@ -604,9 +594,8 @@ exports.scrapeVaccineData = functions
       const errorMessage = "Error updating vaccine data\n"+error
       response.send(errorMessage)
   })
-
-
-
+  } else {
+    response.send({"status":"ERROR",message:"vaccine data is not fresh"})
   }
 
   
