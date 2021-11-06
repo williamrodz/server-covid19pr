@@ -23,6 +23,118 @@ const util = require('util')
 const NO_NEW_CASES_MESSAGE = "ZERO_MOLECULAR_CASES"
 const PR_HEALTH_DEPT_COVID_URL = "https://covid19datos.salud.gov.pr/"
 const NUMBERS = "0123456789"
+const SCRAPE_TYPE_CASES = "SCRAPE_TYPE_CASES"
+const SCRAPE_TYPE_VACCINATIONS = "SCRAPE_TYPE_VAX" 
+
+
+const TEST_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/"
+const PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net"
+
+// SCHEDULED FUNCTIONS
+
+exports.actionsFor8AM = functions.pubsub.schedule('00 8 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+  Promise.all(
+    [
+      fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+      fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'})
+  ])
+  .then(data=>{
+    console.log("Success scraping today's data at 8am "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping today's data at 8am: "+error)
+    return error
+  })
+
+});
+
+exports.actionsfor9AM = functions.pubsub.schedule('00 9 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+  Promise.all(
+    [
+      fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+      fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
+      fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+      fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})
+    ])
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping todays data at 9am: "+error)
+    return error
+  })
+
+});
+
+exports.actionsForNoon = functions.pubsub.schedule('30 12 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    Promise.all(
+      [
+        fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
+      ])
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping today's number: "+error)
+    return error
+  })
+
+});
+
+exports.actionsFor5PM = functions.pubsub.schedule('00 17 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    Promise.all(
+      [
+        fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
+      ])
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping today's number: "+error)
+    return error
+  })
+
+});
+
+exports.actionsFor9PM = functions.pubsub.schedule('00 21 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    Promise.all(
+      [
+        fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
+      ])
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping today's number: "+error)
+    return error
+  })
+
+});
+
 
 // Helper Functions
 cleanString = (text) =>{
@@ -95,7 +207,7 @@ const sendScraper = async () => {
       outputHTML.molecularPositive = ( molecularPositive.innerText);
       outputHTML.antigenPositive = (antigenPositive.innerText);
       outputHTML.deaths = (deaths.innerText);
-      outputHTML.saludTimeSignature = saludTimeSignature.innerText;
+      outputHTML.saludTimeSignature = saludTimeSignature.innerText.trim();
     }
     catch (exception){
       console.log("exception");
@@ -147,14 +259,33 @@ https.onRequest(async (request, response) => {
     
 
     dataForToday.totalPositive = (dataForToday.molecularPositive)+(dataForToday.antigenPositive);
-    if (isSaludSignatureFresh(dataForToday["saludTimeSignature"])){
+    let dateIsFresh = await shouldTakeDataForDateAndType(dataForToday["saludTimeSignature"],SCRAPE_TYPE_CASES)
+    if (dateIsFresh || request.query.force){
       let ref = admin.firestore().doc("data/todaysData")
-      await ref.set(dataForToday)
-      return response.send({"status":"success","newData":dataForToday})
+      ref.set(dataForToday)
+      .then(()=>{
+        console.log(`Success scraping today's case count`)
+        console.log(`Now attempting log to history of cases...`)
+        let casesHistoryRef = admin.firestore().doc('data/historicalData');
+        return casesHistoryRef.update(
+          'all', admin.firestore.FieldValue.arrayUnion(dataForToday)
+        )
+      })
+      .then(()=>{
+        console.log(`Success logging today's case count to history!`)
+        return response.send({"status":"success","message":"Today's data scraped and logged to history","newData":dataForToday})
+
+      })
+      .catch(e=>{
+        console.log(`Error in the scraping order of events:${e}`)
+      })
+
     } else{
-      throw new Error("Did not scrape: Health Department data is stale.")
+      return response.send({"status":"failure","message":"Scraped data is stale"})
     }
-    // return response.send(dataForToday)
+
+    return response.send({"status":"failure","message":"Unknown error"})
+
   })
   .catch(error=>{
     const errorMessage = "Error scraping/writing\n"+error + "Finish error"
@@ -163,58 +294,6 @@ https.onRequest(async (request, response) => {
   })
 });
 
-TEST_URL = "http://localhost:5001/covid19puertorico-1a743/us-central1/"
-PRODUCTION_URL = "https://us-central1-covid19puertorico-1a743.cloudfunctions.net"
-
-
-exports.eightAMscheduleScrape = functions.pubsub.schedule('00 8 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-  Promise.all([fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
-  fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'})
-  ])
-  .then(data=>{
-    console.log("Success scraping today's data at 8am "+Object.keys(data))
-    return data
-  })
-  .catch(error=>{
-    console.log("Error scraping today's data at 8am: "+error)
-    return error
-  })
-
-});
-
-exports.nineAMScheduledScrape = functions.pubsub.schedule('00 9 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-  Promise.all([fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
-  fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'})])
-  .then(data=>{
-    console.log("Success scraping today's numbers: "+Object.keys(data))
-    return data
-  })
-  .catch(error=>{
-    console.log("Error scraping todays data at 9am: "+error)
-    return error
-  })
-
-});
-
-exports.noonScheduledScrape = functions.pubsub.schedule('30 12 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-    Promise.all([fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
-    fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'})])
-  .then(data=>{
-    console.log("Success scraping today's numbers: "+Object.keys(data))
-    return data
-  })
-  .catch(error=>{
-    console.log("Error scraping today's number: "+error)
-    return error
-  })
-
-});
 
 exports.logTodaysDataToHistory = functions.https.onRequest((request, response) => {
   let ref = admin.firestore().doc("data/todaysData")
@@ -244,57 +323,51 @@ exports.logTodaysDataToHistory = functions.https.onRequest((request, response) =
 });
 
 
+const getDateOfLastScrapeForDataType = async (scrapeType) =>{
 
-exports.scheduledHistoryAddToday = functions.pubsub.schedule('10 8 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-    var url = `${PRODUCTION_URL}/logTodaysDataToHistory`
-    fetch(url,{method:'GET'})
-      .then(data=>{
-          console.log("Success adding today's data to history: "+Object.keys(data))
-          return data
-        })
-      .catch(error=>{
-        console.log("Error adding today's data to history: "+error)
-        return error
-      })
-
-});
+  let documentIndex; 
+  if (scrapeType === SCRAPE_TYPE_CASES){
+    documentIndex = "data/historicalData"
+  } else if (scrapeType === SCRAPE_TYPE_VACCINATIONS){
+    documentIndex = "data/vaccineHistory"
+  } else {
+    throw new Error(`Invalid scrape type: ${scrapeType}`)
+  }
 
 
-exports.secondScheduledHistoryAddToday = functions.pubsub.schedule('40 9 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
+  let ref = admin.firestore().doc(documentIndex)
 
-    var url = `${PRODUCTION_URL}/logTodaysDataToHistory`
-    fetch(url,{method:'GET'})
-      .then(data=>{
-          console.log("Success adding today's data to history: "+Object.keys(data))
-          return data
-        })
-      .catch(error=>{
-        console.log("Error adding today's data to history: "+error)
-        return error
-      })
+  let allHistoricalDataSnapshot = await ref.get()
 
-});
+  let allHistoricalData = allHistoricalDataSnapshot.exists ? allHistoricalDataSnapshot.data().all : {'status':'DATA_NOT_AVAILABLE'}
+  
+  let lastScraped =  allHistoricalData[allHistoricalData.length - 1]
+  let lastScrapedDate = lastScraped[scrapeType === SCRAPE_TYPE_CASES ? "saludTimeSignature" : "timeSignature"]
 
-exports.thirdScheduledHistoryAddToday = functions.pubsub.schedule('40 12 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
+  return lastScrapedDate
 
-    var url = `${PRODUCTION_URL}/logTodaysDataToHistory`
-    fetch(url,{method:'GET'})
-      .then(data=>{
-          console.log("Success adding today's data to history: "+Object.keys(data))
-          return data
-        })
-      .catch(error=>{
-        console.log("Error adding today's data to history: "+error)
-        return error
-      })
+}
 
-});
+const getDateObjectFromTimeSingature = (dateString) =>{
+  // console.log(`Processing datestring ${dateString}`)
+  let MMSDDSYYYY = dateString.split(" ")[2]
+  let listOfMMSDDSYYYY = MMSDDSYYYY.split("/")
+
+  let convertedDateObj = new Date(listOfMMSDDSYYYY[2],listOfMMSDDSYYYY[0] - 1,listOfMMSDDSYYYY[1])
+  // console.log(`Obtained date: ${convertedDateObj}`)
+  return convertedDateObj
+
+}
+
+const shouldTakeDataForDateAndType = async (scrapeDateString,scrapeType) =>{
+
+  let lastScrapedDateString = await getDateOfLastScrapeForDataType(scrapeType)
+
+  let newScrapeDate = getDateObjectFromTimeSingature(scrapeDateString)
+  let latestScrapedDate = getDateObjectFromTimeSingature(lastScrapedDateString)
+
+  return latestScrapedDate < newScrapeDate
+}
 
 const isSaludSignatureFresh = (dateString) =>{
   let currentESTTime = getCurrentESTTime()
@@ -449,7 +522,7 @@ exports.tweetVaccineMessage = functions.https.onRequest( async (request, respons
   if (vaccineTweet === DO_NOT_TWEET){
     return response.send({"status":DO_NOT_TWEET,"message":"zero change in vaccine data, will not tweet"})
   }
-  else if (!vaccineDataFresh){
+  else if (!request.query.force && !vaccineDataFresh){
     return response.send({"status":DO_NOT_TWEET,"message":"Vaccine data is stale"})
   }  
   else {
@@ -498,21 +571,9 @@ const getTodaysMessage = async (messageType) =>{
 
     let today = data[0]
     let saludTimeSignature = today.saludTimeSignature.trim()
-    let leadingText = ","
-    let leadingTextIndex = saludTimeSignature.indexOf(leadingText)
-    let justSaludDate = saludTimeSignature.substring(leadingTextIndex+2,saludTimeSignature.length)
-
-    const dataIsTodayFresh = data[2]
-
-    //No new cases, don't tweet
-    // if (historical.newMolecularPositiveToday === 0){
-    //   console.log("no new cases!!")
-    //   return NO_NEW_CASES_MESSAGE
-    // } 
-
 
     let historical = data[1]
-    var message = `COVIDTrackerPR.com\n${justSaludDate}\n\n`
+    var message = `COVIDTrackerPR.com\n${saludTimeSignature}\n\n`
     message += `Total de pruebas positivas: ${formatInteger(today.totalPositive)} (+${formatInteger(historical.newPositivesToday)} hoy)\n`
     message += `moleculares: ${formatInteger(today.molecularPositive)} (+${formatInteger(historical.newMolecularPositiveToday)} hoy)\n`
     message += `antígeno: ${formatInteger(today.antigenPositive)} (+${formatInteger(historical.newAntigenPositive)} hoy)\n`
@@ -545,7 +606,7 @@ const scrapeVaccineData = async () =>{
     let timeSignature = (document.querySelector('#dashboard_covid--vacunacion > div.u-heading-v2-3--bottom.g-brd-primary.ml-3.g-my-10 > div.g-font-size-16.g-color-primary').innerText);
 
 
-    return {peopleWithAtLeastOneDose:peopleWithAtLeastOneDose,peopleWithTwoDoses:peopleWithTwoDoses,timeSignature:timeSignature}
+    return {peopleWithAtLeastOneDose:peopleWithAtLeastOneDose,peopleWithTwoDoses:peopleWithTwoDoses,timeSignature:timeSignature.trim()}
   });
 
   console.log("Got data!..")
@@ -567,7 +628,7 @@ exports.scrapeVaccineData = functions
   if (dataSnapshot.exists){
     if (isSaludSignatureFresh(dataSnapshot.data().timeSignature)){
       // data is fresh for today, no scrape needed
-      return response.send({"status":"OK","message":"Scrape was performed earlier today"})
+      return response.send({"status":"OK","message":"Scrape shows data is from today"})
     }
   }
 
@@ -575,8 +636,8 @@ exports.scrapeVaccineData = functions
   let vaccineDataForToday = await scrapeVaccineData();
   console.log("Now checking data..")
   // Update today's vaccination info
-  if (isSaludSignatureFresh(vaccineDataForToday.timeSignature)){
-    console.log("Vaccine data is fresh")
+  if (await shouldTakeDataForDateAndType(vaccineDataForToday.timeSignature,SCRAPE_TYPE_CASES) || (request.query.force)){
+    console.log("Vaccine data is new!")
 
     // Add to vaccinesToday index
     let ref = admin.firestore().doc("data/vaccinesToday")
@@ -684,24 +745,6 @@ exports.sendAllSMS = functions.https.onRequest(async(request, response) => {
 
 });
 
-exports.scheduledSMSQA = functions.pubsub.schedule('30 10 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-
-    url = `${PRODUCTION_URL}/sendAllSMS`
-    fetch(url,{method:'GET'})
-      .then(data=>{
-          console.log("Success sending SMS message today:"+data)
-          return data
-        })
-      .catch(error=>{
-        console.log("Error sending today's SMS"+error)
-        return error
-      })
-
-});
-
-
 const logTweetDone = async () =>{
   let ref = admin.firestore().doc("data/tweet")
   const todaysDayOfMonth = (new Date(getCurrentESTTime())).getDate()
@@ -734,7 +777,7 @@ exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
 
   let dataFresh = await isTodaysDataFresh()
 
-  if (dataFresh === false){
+  if (!request.query.force && dataFresh === false){
     return response.send({"status":"stale","message":"Did not tweet. Data is not fresh"})
   }
 
@@ -760,60 +803,6 @@ exports.tweetDailyInfo = functions.https.onRequest(async(request, response) => {
   }
 
 });
-
-
-
-exports.scheduledTweet = functions.pubsub.schedule('30 9 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-
-    Promise.all([fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-                  fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})])
-      .then(data=>{
-          console.log("Success executing today's tweets\n"+data)
-          return data
-        })
-      .catch(error=>{
-        console.log("Error sending today's tweets\n"+error)
-        return error
-      })
-
-});
-
-exports.secondScheduledTweet = functions.pubsub.schedule('30 10 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-
-    Promise.all([fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-                  fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})])
-      .then(data=>{
-          console.log("Success executing today's tweet\n"+data)
-          return data
-        })
-      .catch(error=>{
-        console.log("Error sending today's Tweet\n"+error)
-        return error
-      })
-
-});
-
-exports.thirdScheduledTweet = functions.pubsub.schedule('0 12 * * *')
-  .timeZone('America/La_Paz')
-  .onRun((context)=>{
-
-    Promise.all([fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-                  fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})])
-      .then(data=>{
-          console.log("Success executing today's tweet\n"+data)
-          return data
-        })
-      .catch(error=>{
-        console.log("Error sending today's Tweet\n"+error)
-        return error
-      })
-
-});
-
 
 // Public-facing API 
 
