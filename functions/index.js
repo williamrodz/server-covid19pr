@@ -135,6 +135,27 @@ exports.actionsFor9PM = functions.pubsub.schedule('00 21 * * *')
 
 });
 
+exports.actionsFor12AM = functions.pubsub.schedule('59 23 * * *')
+  .timeZone('America/La_Paz')
+  .onRun((context)=>{
+    Promise.all(
+      [
+        fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
+        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
+      ])
+  .then(data=>{
+    console.log("Success scraping today's numbers: "+Object.keys(data))
+    return data
+  })
+  .catch(error=>{
+    console.log("Error scraping today's number: "+error)
+    return error
+  })
+
+});
+
 
 // Helper Functions
 cleanString = (text) =>{
@@ -636,7 +657,9 @@ exports.scrapeVaccineData = functions
   let vaccineDataForToday = await scrapeVaccineData();
   console.log("Now checking data..")
   // Update today's vaccination info
-  if (await shouldTakeDataForDateAndType(vaccineDataForToday.timeSignature,SCRAPE_TYPE_CASES) || (request.query.force)){
+  let dataShouldBeTaken = await shouldTakeDataForDateAndType(vaccineDataForToday.timeSignature,SCRAPE_TYPE_VACCINATIONS)
+  console.log(`Is the date on the scraped data after the last recorded scrape?: ${dataShouldBeTaken ? `YES` : `nope: ${vaccineDataForToday.timeSignature}`}`)
+  if (dataShouldBeTaken || (request.query.force)){
     console.log("Vaccine data is new!")
 
     // Add to vaccinesToday index
@@ -745,11 +768,6 @@ exports.sendAllSMS = functions.https.onRequest(async(request, response) => {
 
 });
 
-const logTweetDone = async () =>{
-  let ref = admin.firestore().doc("data/tweet")
-  const todaysDayOfMonth = (new Date(getCurrentESTTime())).getDate()
-  await ref.set(todaysDayOfMonth)
-}
 
 const postTweet = async (message)=>{
   var Twitter = require('twitter');
@@ -763,7 +781,6 @@ const postTweet = async (message)=>{
 
   return twitterClient.post('statuses/update', {status: message})
     .then( async (tweet) => {
-      await logTweetDone();
       console.log(tweet);
       return tweet
     })
