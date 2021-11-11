@@ -59,7 +59,6 @@ exports.actionsfor9AM = functions.pubsub.schedule('00 9 * * *')
       fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
       fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
       fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-      fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})
     ])
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
@@ -80,7 +79,6 @@ exports.actionsForNoon = functions.pubsub.schedule('30 12 * * *')
         fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
       ])
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
@@ -101,7 +99,6 @@ exports.actionsFor5PM = functions.pubsub.schedule('00 17 * * *')
         fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
       ])
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
@@ -122,7 +119,6 @@ exports.actionsFor9PM = functions.pubsub.schedule('00 21 * * *')
         fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
       ])
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
@@ -143,7 +139,6 @@ exports.actionsFor12AM = functions.pubsub.schedule('59 23 * * *')
         fetch(`${PRODUCTION_URL}/scrapeTodaysData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/scrapeVaccineData`,{method:'GET'}),
         fetch(`${PRODUCTION_URL}/tweetDailyInfo`,{method:'GET'}),
-        fetch(`${PRODUCTION_URL}/tweetVaccineMessage`,{method:'GET'})      
       ])
   .then(data=>{
     console.log("Success scraping today's numbers: "+Object.keys(data))
@@ -280,7 +275,7 @@ https.onRequest(async (request, response) => {
     
 
     dataForToday.totalPositive = (dataForToday.molecularPositive)+(dataForToday.antigenPositive);
-    let dateIsFresh = await shouldTakeDataForDateAndType(dataForToday["saludTimeSignature"],SCRAPE_TYPE_CASES)
+    let dateIsFresh = await shouldTakeDataForDateAndType(dataForToday,SCRAPE_TYPE_CASES)
     if (dateIsFresh || request.query.force){
       let ref = admin.firestore().doc("data/todaysData")
       ref.set(dataForToday)
@@ -344,7 +339,7 @@ exports.logTodaysDataToHistory = functions.https.onRequest((request, response) =
 });
 
 
-const getDateOfLastScrapeForDataType = async (scrapeType) =>{
+const getLastDataEntryForDataType = async (scrapeType) =>{
 
   let documentIndex; 
   if (scrapeType === SCRAPE_TYPE_CASES){
@@ -355,16 +350,19 @@ const getDateOfLastScrapeForDataType = async (scrapeType) =>{
     throw new Error(`Invalid scrape type: ${scrapeType}`)
   }
 
-
   let ref = admin.firestore().doc(documentIndex)
 
   let allHistoricalDataSnapshot = await ref.get()
 
   let allHistoricalData = allHistoricalDataSnapshot.exists ? allHistoricalDataSnapshot.data().all : {'status':'DATA_NOT_AVAILABLE'}
-  
   let lastScraped =  allHistoricalData[allHistoricalData.length - 1]
-  let lastScrapedDate = lastScraped[scrapeType === SCRAPE_TYPE_CASES ? "saludTimeSignature" : "timeSignature"]
+  return lastScraped;
 
+} 
+
+const getDateOfLastScrapeForDataType = async (scrapeType) =>{
+  let lastScraped = getLastDataEntryForDataType(scrapeType)
+  let lastScrapedDate = lastScraped[scrapeType === SCRAPE_TYPE_CASES ? "saludTimeSignature" : "timeSignature"]
   return lastScrapedDate
 
 }
@@ -380,14 +378,33 @@ const getDateObjectFromTimeSingature = (dateString) =>{
 
 }
 
-const shouldTakeDataForDateAndType = async (scrapeDateString,scrapeType) =>{
+const shouldTakeDataForDateAndType = async (newlyScrapedData,scrapeType) =>{
 
-  let lastScrapedDateString = await getDateOfLastScrapeForDataType(scrapeType)
+  let lastScraped = await getLastDataEntryForDataType(scrapeType)
 
-  let newScrapeDate = getDateObjectFromTimeSingature(scrapeDateString)
+  let newlyScrapedDateString = newlyScrapedData[scrapeType === SCRAPE_TYPE_CASES ? "saludTimeSignature" : "timeSignature"]
+  let lastScrapedDateString = lastScraped[scrapeType === SCRAPE_TYPE_CASES ? "saludTimeSignature" : "timeSignature"]
+
+  let newScrapeDate = getDateObjectFromTimeSingature(newlyScrapedDateString)
   let latestScrapedDate = getDateObjectFromTimeSingature(lastScrapedDateString)
 
-  return latestScrapedDate < newScrapeDate
+  let dataIsNewer = latestScrapedDate < newScrapeDate
+
+  let attributes = Object.keys(lastScraped)
+
+  var allColumnsAreEqual = true 
+  for (let index = 0; index < attributes.length; index++) {
+    const column = attributes[index];
+    if (column.indexOf("Signature") === -1 && lastScraped[column] !== newlyScrapedData[column]){
+      console.log(`Data entry asymmetric for ${column}`)
+      allColumnsAreEqual = false
+      break
+    }    
+    
+  }
+
+
+  return dataIsNewer && !allColumnsAreEqual
 }
 
 const isSaludSignatureFresh = (dateString) =>{
@@ -657,7 +674,7 @@ exports.scrapeVaccineData = functions
   let vaccineDataForToday = await scrapeVaccineData();
   console.log("Now checking data..")
   // Update today's vaccination info
-  let dataShouldBeTaken = await shouldTakeDataForDateAndType(vaccineDataForToday.timeSignature,SCRAPE_TYPE_VACCINATIONS)
+  let dataShouldBeTaken = await shouldTakeDataForDateAndType(vaccineDataForToday,SCRAPE_TYPE_VACCINATIONS)
   console.log(`Is the date on the scraped data after the last recorded scrape?: ${dataShouldBeTaken ? `YES` : `nope: ${vaccineDataForToday.timeSignature}`}`)
   if (dataShouldBeTaken || (request.query.force)){
     console.log("Vaccine data is new!")
@@ -672,7 +689,12 @@ exports.scrapeVaccineData = functions
       'all', admin.firestore.FieldValue.arrayUnion(vaccineDataForToday)
     )
     .then(data => {
-      return response.send({"status":"OK",message:"Updated vaccination history succesfully",data:vaccineDataForToday})
+      console.log(`Updated vaccination history succesfully"`)
+      return true
+    })
+    .then(async(data) =>{
+      let vaccineTweet = await obtainVaccineMessage();
+      return response.send(await postTweet(vaccineTweet))
     })
     .catch(error=>{
       const errorMessage = "Error updating vaccine data\n"+error
