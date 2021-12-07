@@ -521,12 +521,12 @@ const obtainVaccineMessage = async() => {
       return DO_NOT_TWEET;  
     }
     let POPULATION_OF_PR = 2799926
-    let percentageFullyVaccinated = ((recentData.peopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(1)
-    let newlyFullyVaccinatedPercentage = ((recentData.newPeopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(1)
-    let percentageOneDose = ((recentData.peopleWithAtLeastOneDose / POPULATION_OF_PR) * 100).toFixed(1) ;
-    let newlyWithOneDosePercentage = ((recentData.newPeopleWithADose / POPULATION_OF_PR) * 100).toFixed(1)
+    let percentageFullyVaccinated = ((recentData.peopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(2)
+    let newlyFullyVaccinatedPercentage = ((recentData.newPeopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(2)
+    let percentageOneDose = ((recentData.peopleWithAtLeastOneDose / POPULATION_OF_PR) * 100).toFixed(2) ;
+    let newlyWithOneDosePercentage = ((recentData.newPeopleWithADose / POPULATION_OF_PR) * 100).toFixed(2)
 
-  
+
     var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n\n`
     message += `Población con 1 de 2 dosis: ${formatInteger(percentageOneDose)}% (+${formatInteger(newlyWithOneDosePercentage)}%)\n`
     message += `Población con serie de dosis completada: ${formatInteger(percentageFullyVaccinated)}% (+${formatInteger(newlyFullyVaccinatedPercentage)}%)\n`
@@ -887,7 +887,6 @@ exports.getTodaysData = functions.https.onRequest(async(request, response) => {
   }
 
 
-  let dataFresh = await isTodaysDataFresh()
   let todaysDataRef = admin.firestore().doc("data/todaysData")
   let todaysDataSnapshot = await todaysDataRef.get()
   let todaysData = todaysDataSnapshot.data()
@@ -907,8 +906,6 @@ exports.getHistoricalData = functions.https.onRequest(async(request, response) =
 
   let userInfoSnapshot = await userInfoRef.get();
   const increment =  admin.firestore.FieldValue.increment(1);
-
-
   
   var isAuthorized = false
   var statusMessage = "" 
