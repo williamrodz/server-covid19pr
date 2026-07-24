@@ -66,3 +66,6 @@ node_modules/
 
 privateKey.json
 .env
+
+# macOS
+.DS_Store
