@@ -520,7 +520,7 @@ const obtainVaccineMessage = async() => {
     if (recentData.newDosesToday === 0 && recentData.newPeopleWithADose === 0 && recentData.newPeopleWithTwoDoses === 0){
       return DO_NOT_TWEET;  
     }
-    let POPULATION_OF_PR = 2799926
+    let POPULATION_OF_PR = 3076212// previously 2799926
     let percentageFullyVaccinated = ((recentData.peopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(2)
     let newlyFullyVaccinatedPercentage = ((recentData.newPeopleWithTwoDoses / POPULATION_OF_PR) * 100).toFixed(2)
     let percentageOneDose = ((recentData.peopleWithAtLeastOneDose / POPULATION_OF_PR) * 100).toFixed(2) ;
@@ -528,8 +528,8 @@ const obtainVaccineMessage = async() => {
 
 
     var message= `http://COVIDTrackerPR.com\n${recentData.timeSignature}\n\n`
-    message += `Población con 1 de 2 dosis: ${formatInteger(percentageOneDose)}% (+${formatInteger(newlyWithOneDosePercentage)}%)\n`
-    message += `Población con serie de dosis completada: ${formatInteger(percentageFullyVaccinated)}% (+${formatInteger(newlyFullyVaccinatedPercentage)}%)\n`
+    message += `Población apta (5 años o más) con 1 de 2 dosis: ${formatInteger(percentageOneDose)}% (+${formatInteger(newlyWithOneDosePercentage)}%)\n`
+    message += `Población apta con serie de dosis completada: ${formatInteger(percentageFullyVaccinated)}% (+${formatInteger(newlyFullyVaccinatedPercentage)}%)\n`
     message += `${getProgressBar(percentageFullyVaccinated)} ${percentageFullyVaccinated}%`
     message += "\n\n#COVIDー19 #PuertoRico #vacunas #vaccines"
     return message;
